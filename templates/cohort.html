@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Cohort · HE Dashboard{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div class="grow">
+        <h1>Cohort</h1>
+        <p class="sub">Compare groups of patients by their baseline clinical status. Exploratory and unadjusted (no correction for age, sex or other factors).</p>
+    </div>
+    <div class="menu">
+        <button class="btn" id="exportBtn" aria-haspopup="true" aria-expanded="false">Export ▾</button>
+        <div class="menu-list" id="exportMenu" hidden>
+            <button id="exportPdf">PDF report<small>All measures for this comparison; opens print → Save as PDF</small></button>
+            {% if not public_demo %}<button id="exportNb">New notebook<small>Pre-filled with this cohort, opens in JupyterLab</small></button>{% endif %}
+        </div>
+    </div>
+</div>
+
+<div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+    <span class="chip">{{ sel.label }} · {{ summary.participants }} of {{ summary.of_total }} patients
+        {% if sel.ids is not none %}<a href="/cohort" title="Use all patients">✕</a>{% endif %}</span>
+    <a class="sub" style="margin:0" href="/{% if sel.params %}?{{ sel.params | urlencode }}{% endif %}">← adjust on Patients tab</a>
+</div>
+
+{% if summary.participants == 0 %}
+<div class="notice">No patients match these filters. <a href="/">Go back to the Patients tab</a> to change them.</div>
+{% else %}
+<div class="strip">
+    <span><strong>{{ summary.participants }}</strong> participants</span>
+    {% for k, v in summary.sex.items() %}<span>{{ k }} <strong>{{ v }}</strong></span>{% endfor %}
+    <span><strong>{{ summary.valid_pct }}%</strong> valid days</span>
+    <span>median night rest <strong>{{ summary.night_rest }} h</strong></span>
+    <span>median rest regularity <strong>{{ summary.sri }}</strong></span>
+</div>
+
+<div class="controls">
+    <label>Compare by
+        <select class="control" id="group">
+            {% for k, v in summary.groups.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}
+        </select>
+    </label>
+    <label>Measure
+        <select class="control" id="metric">
+            {% for k, v in summary.metrics.items() %}<option value="{{ k }}">{{ v.label }}</option>{% endfor %}
+        </select>
+    </label>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <h2>Over the study (median and middle 50%, per study week)</h2>
+        <p class="hint">Each person's week is averaged first. Weeks with fewer than 5 people in a group are hidden. Lines that stay apart mean a baseline difference, not a change over time.</p>
+        <div id="traj"></div>
+        <div class="legend" id="trajLegend"></div>
+    </div>
+    <div class="card">
+        <h2>One dot per patient</h2>
+        <p class="hint">Each patient's median across valid days.</p>
+        <div id="strip"></div>
+        <div class="stat-line" id="stat"></div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>About these measures</h2>
+    <p class="hint" style="margin:0">This file has no sleep stages and no clinical event dates. <strong>Night rest</strong>, <strong>rest regularity</strong> and <strong>rest midpoint</strong> are proxies built from Oura's 5-minute activity classes. Clinical labels were recorded once at enrolment. See the <a href="/notebooks">trajectories notebook</a> for the full method and where event data could come from.</p>
+</div>
+
+<script>
+(function () {
+    'use strict';
+    const SEL = {{ sel.params | tojson }};
+    const COLORS = ['#2563eb', '#d97706'];
+    const clock = h => { const m = Math.round((18 + h) * 60) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const groupEl = document.getElementById('group'), metricEl = document.getElementById('metric');
+    const qs = extra => new URLSearchParams({...SEL, ...extra}).toString();
+
+    async function draw() {
+        if (!groupEl) return;
+        const res = await fetch('/api/cohort?' + qs({group: groupEl.value, metric: metricEl.value}));
+        const d = await res.json();
+        const fmt = d.metric.unit === 'clock' ? clock : (v => +v.toFixed(d.metric.digits === 0 ? 0 : 1));
+        const weeks = [...new Set(d.levels.flatMap(l => l.weeks))].sort((a, b) => a - b);
+        const align = (l, key) => weeks.map(w => { const i = l.weeks.indexOf(w); return i < 0 ? null : l[key][i]; });
+        Charts.lineChart(document.getElementById('traj'), {
+            x: weeks.length ? weeks : [1], xLabel: 'study week', height: 260, yFormat: fmt,
+            series: d.levels.map((l, i) => ({y: align(l, 'median'), color: COLORS[i], width: 2.5})),
+            bands: d.levels.map((l, i) => ({lo: align(l, 'q1'), hi: align(l, 'q3'), color: COLORS[i]})),
+        });
+        document.getElementById('trajLegend').innerHTML = d.levels
+            .map((l, i) => `<span><i style="background:${COLORS[i]}"></i>${l.name} (n=${l.n})</span>`).join('');
+        Charts.stripChart(document.getElementById('strip'),
+            d.levels.map((l, i) => ({name: l.name, color: COLORS[i], values: l.people})), {height: 260, yFormat: fmt});
+        const unit = d.metric.unit === 'clock' ? '' : ' ' + d.metric.unit;
+        let txt = d.levels.map(l => `${l.name}: median <strong>${l.overall_median === null ? '—' : fmt(l.overall_median) + unit}</strong>`).join(' · ');
+        if (d.p_value !== undefined) {
+            txt += `<br>Mann-Whitney p = <strong>${d.p_value}</strong>, effect size r = ${d.effect_r} `
+                + (d.p_value < 0.05 ? '(a difference worth a closer look)' : '(no clear difference)');
+        } else {
+            txt += '<br><span style="color:#94a3b8">Too few patients in one group for a test.</span>';
+        }
+        document.getElementById('stat').innerHTML = txt;
+    }
+
+    // Export menu
+    const btn = document.getElementById('exportBtn'), menu = document.getElementById('exportMenu');
+    btn.addEventListener('click', e => { e.stopPropagation(); menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', String(!menu.hidden)); });
+    document.addEventListener('click', () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); });
+    const currentGroup = () => groupEl ? groupEl.value : 'decomp';
+
+    document.getElementById('exportPdf').addEventListener('click', () => {
+        window.open('/cohort/report?' + qs({group: currentGroup()}), '_blank');
+    });
+    document.getElementById('exportNb')?.addEventListener('click', async () => {
+        const res = await fetch('/api/cohort/notebook', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                         body: JSON.stringify({...SEL, group: currentGroup()})});
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        if (res.ok) {
+            const d = await res.json();
+            toast.innerHTML = `Created <strong>${d.file}</strong>. ` + (d.url ? `<a href="${d.url}" target="_blank" rel="noopener">Open in JupyterLab</a>` : 'See the Notebooks tab.');
+            if (d.url) window.open(d.url, '_blank');
+        } else {
+            toast.textContent = 'Could not create the notebook.';
+        }
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 8000);
+    });
+
+    if (groupEl) {
+        [groupEl, metricEl].forEach(el => el.addEventListener('change', draw));
+        window.addEventListener('resize', draw);
+        draw();
+    }
+})();
+</script>
+{% endblock %}

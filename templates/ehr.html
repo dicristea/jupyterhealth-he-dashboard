@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}EHR launch · HE Dashboard{% endblock %}
+{% block content %}
+<h1>EHR launch (SMART on FHIR)</h1>
+<p class="sub">Bare bones of how this dashboard opens from inside an EHR (for example Medplum). The EHR passes the patient in context, we read the patient's MRN and open their profile. Wearable data never goes into the EHR. Only the MRN is needed to match it.</p>
+
+{% if error %}<div class="notice">{{ error }}</div>{% endif %}
+{% if public_demo %}<div class="notice">Public demo: real EHR launches are switched off. Use <em>Simulate launch</em> with a synthetic MRN to see what a launch from the patient's chart does.</div>{% endif %}
+
+<div class="two-col">
+    {% if not public_demo %}
+    <div class="card">
+        <h2>Connection settings</h2>
+        <table class="list" style="margin-top:8px">
+            <tr><td>Client ID</td><td>{% if smart.client_id %}<code>{{ smart.client_id }}</code>{% else %}<span class="quality low">not set: <code>SMART_CLIENT_ID</code></span>{% endif %}</td></tr>
+            <tr><td>Launch URL</td><td><code>{{ launch_url }}</code></td></tr>
+            <tr><td>Redirect URL</td><td><code>{{ redirect_uri }}</code></td></tr>
+            <tr><td>Scopes</td><td><code>{{ smart.scope }}</code></td></tr>
+            <tr><td>MRN identifier system</td><td><code>{{ mrn_system }}</code></td></tr>
+            <tr><td>MRN → patient mapping</td><td>{% if data_source == 'synthetic' %}synthetic MRNs (below){% elif mrn_map %}<code>HE_MRN_MAP</code> file{% else %}<span class="quality low">none: the de-identified study file has no MRNs</span>{% endif %}</td></tr>
+        </table>
+    </div>
+    {% endif %}
+    <div class="card">
+        <h2>Test without an EHR</h2>
+        <p class="hint">Pretend the EHR launched a patient with this MRN.</p>
+        <form action="/ehr/simulate" method="get" style="display:flex;gap:8px">
+            <input class="control" name="mrn" placeholder="MRN, e.g. {{ examples[0][1] if examples else 'JH-…' }}" style="flex:1;font:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">
+            <button class="btn primary" type="submit">Simulate launch</button>
+        </form>
+        {% if examples %}
+        <p class="hint" style="margin:10px 0 4px">Synthetic patients and their MRNs:</p>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+            {% for pid, mrn in examples %}<a class="btn" href="/ehr/simulate?mrn={{ mrn }}">{{ mrn }}</a>{% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if not public_demo %}
+<div class="card">
+    <h2>Connect Medplum</h2>
+    <ol class="hint" style="padding-left:18px;margin:6px 0 0;line-height:1.9">
+        <li>In Medplum, go to <strong>Admin → Project → Clients → New</strong>. Set <em>Launch URI</em> to <code>{{ launch_url }}</code> and <em>Redirect URI</em> to <code>{{ redirect_uri }}</code>.</li>
+        <li>Start this app with <code>SMART_CLIENT_ID=&lt;client id&gt;</code> (add <code>SMART_CLIENT_SECRET</code> if Medplum gives you one).</li>
+        <li>Create a <strong>synthetic</strong> test Patient in Medplum with an identifier: system <code>{{ mrn_system }}</code>, value = one of the MRNs above, or seed them all with <code>python scripts/seed_medplum.py</code> (see <code>docs/medplum.md</code>).</li>
+        <li>Open that patient in Medplum → <strong>Apps</strong> tab → click this app. Medplum asks you to <em>Choose scope</em> (<code>{{ smart.scope }}</code>), and then this dashboard opens on that patient.</li>
+    </ol>
+    <p class="hint" style="margin-top:8px">⚠️ Synthetic patients only. This app has no login, and real MRNs must never be mapped to study data until IRB approval and authentication are in place.</p>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>Recent launches</h2>
+    {% if log %}
+    <table class="list"><thead><tr><th>Time</th><th>From</th><th>MRN</th><th>Opened</th></tr></thead><tbody>
+        {% for l in log %}<tr><td>{{ l.time }}</td><td>{{ l.source }}</td><td>{{ l.mrn }}</td><td>{{ l.patient }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% else %}<p class="hint" style="margin:0">No launches yet in this session.</p>{% endif %}
+</div>
+{% endblock %}

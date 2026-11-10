@@ -1,0 +1,6 @@
+# Send nothing to the Docker build except the app itself (see Dockerfile and docs/hosting.md).
+*
+!app.py
+!data.py
+!templates/
+!static/

@@ -1,0 +1,18 @@
+# Render Blueprint for the public synthetic demo (docs/hosting.md, docs/render-quickstart.md).
+# Not applied until someone connects it in Render. Spec: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: he-dashboard-synthetic-demo
+    runtime: docker
+    plan: free
+    region: oregon  # the default; can't be changed after the service is created
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz  # answers without loading data or templates
+    autoDeployTrigger: "off"  # deploy by hand (Manual Deploy) after reviewing changes; replaces the deprecated autoDeploy
+    envVars:
+      - key: HE_PUBLIC_DEMO
+        value: "1"
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      # Optional shared login (HTTP basic auth). Add DEMO_PASSWORD (and DEMO_USER, default "demo") in the
+      # Render dashboard → Environment rather than here, so the password never lands in the repo.

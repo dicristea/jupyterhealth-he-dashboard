@@ -1,0 +1,69 @@
+# ── Study data: NEVER commit. This repo must contain code only. ──────────────
+# The de-identified HE study file lives outside the repo (../de-identified data/).
+*.rds
+*.RData
+*.rda
+*.csv
+*.csv.gz
+*.xlsx
+*.xls
+*.parquet
+*.sav
+*.dta
+*.feather
+de-identified data/
+deidentified_data/
+exploration_outputs/
+_cache/
+data/
+synthetic_data/
+*.tsv
+*.json.gz
+*.zip
+*.pkl
+*.pickle
+*.joblib
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.sqlite
+*.db
+.Rhistory
+.Rproj.user/
+
+# Exports and screenshots of charts can show study rows
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.heic
+*.webp
+
+# Notebook outputs contain data; only the jupytext .py versions are committed
+*.ipynb
+.ipynb_checkpoints/
+# Jupyter AI chats can contain pasted data or outputs
+*.chat
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Local agent settings and worktrees (can hold local paths)
+.claude/
+
+# Python / tooling
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Patients · HE Dashboard{% endblock %}
+{% block content %}
+<h1>Patients</h1>
+<p class="sub">Set filters and click <strong>Apply filters</strong>. The summary, the list and "Open as cohort" all update together. Click a patient to open their profile. Values are medians across valid days (≥80% ring wear).</p>
+
+<div class="strip {% if sel.ids is not none %}strip-filtered{% endif %}">
+    {% if sel.ids is not none %}<span class="strip-label">Filtered cohort: <strong>{{ sel.label }}</strong></span>{% endif %}
+    <span><strong>{{ summary.participants }}</strong>{% if sel.ids is not none %} of {{ summary.of_total }}{% endif %} participants</span>
+    {% if summary.participants %}
+    {% for k, v in summary.sex.items() %}<span>{{ k }} <strong>{{ v }}</strong></span>{% endfor %}
+    <span><strong>{{ "{:,}".format(summary.days) }}</strong> participant-days</span>
+    <span>median <strong>{{ summary.median_days }}</strong> days each</span>
+    <span><strong>{{ summary.valid_pct }}%</strong> valid days</span>
+    <span>night rest <strong>{{ summary.night_rest }} h</strong></span>
+    <span>regularity <strong>{{ summary.sri }}</strong></span>
+    {% endif %}
+</div>
+
+<form class="card filters" method="get" action="/" id="filterForm">
+    <div class="filter-grid">
+        <label>Patient ID<input type="search" name="q" value="{{ sel.params.q or '' }}" placeholder="contains…"></label>
+        {% for key in ['he', 'ctp', 'decomp', 'ascites', 'he_meds', 'etiology', 'sex'] %}
+        <label>{{ filters[key].label }}
+            <select name="{{ key }}">
+                <option value="">Any</option>
+                {% for o in options[key] %}<option {% if sel.params[key] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+            </select>
+        </label>
+        {% endfor %}
+        {% for key in ['age', 'meld'] %}
+        <label>{{ filters[key].label }}
+            <span class="range">
+                <input type="number" name="{{ key }}_min" value="{{ sel.params[key ~ '_min'] or '' }}" placeholder="min" step="any">
+                <span>–</span>
+                <input type="number" name="{{ key }}_max" value="{{ sel.params[key ~ '_max'] or '' }}" placeholder="max" step="any">
+            </span>
+        </label>
+        {% endfor %}
+        <label>{{ filters.valid_pct.label }}<input type="number" name="valid_pct" min="0" max="100" value="{{ sel.params.valid_pct or '' }}" placeholder="e.g. 70"></label>
+        <label class="check"><input type="checkbox" name="attention" value="1" {% if sel.params.attention %}checked{% endif %}>
+            <span>Needs attention<small>last 7 days worse than this patient's usual 10–90% range</small></span></label>
+    </div>
+    <div class="filter-actions">
+        <button class="btn primary" type="submit">Apply filters</button>
+        <a class="btn" href="/">Clear</a>
+        <span id="pending" class="pending" hidden>Filters changed. Click Apply.</span>
+        <span id="count" class="sub" style="margin:0 0 0 auto"></span>
+        <a class="btn primary {% if summary.participants == 0 %}disabled{% endif %}"
+           href="/cohort{% if sel.params %}?{{ sel.params | urlencode }}{% endif %}">
+            {% if sel.ids is not none %}Open these {{ summary.participants }} as cohort →{% else %}Open all as cohort →{% endif %}</a>
+    </div>
+</form>
+
+<div class="card">
+    <table class="list" id="patients">
+        <thead><tr>
+            <th data-k="id">Patient</th><th data-k="sex">Sex</th><th data-k="age">Age</th>
+            <th data-k="ctp">Child-Pugh</th><th data-k="meld">MELD</th><th data-k="he">HE</th>
+            <th data-k="night_rest">Night rest (h)</th><th data-k="sri">Regularity</th>
+            <th data-k="hrv">HRV</th><th data-k="steps">Steps</th>
+            <th data-k="valid_pct">Valid days</th><th data-k="attention">Flags</th><th>Night rest trend</th>
+        </tr></thead>
+        <tbody></tbody>
+    </table>
+    <p class="hint" id="empty" hidden style="margin:14px 0 0">No patients match these filters. <a href="/">Clear filters</a>.</p>
+</div>
+
+<script>
+(function () {
+    'use strict';
+    const rows = {{ patients | tojson }};
+    const SELECTED = {{ sel.ids | tojson }};
+    const SYNTHETIC = {{ (data_source == 'synthetic') | tojson }};
+    let sortKey = 'id', asc = true;
+    const tbody = document.querySelector('#patients tbody');
+    const dash = v => (v === null || v === undefined) ? '—' : v;
+    const shown = SELECTED === null ? rows : rows.filter(r => SELECTED.includes(r.id));
+
+    function spark(values) {
+        const v = values.filter(x => x !== null);
+        if (v.length < 2) return '';
+        const lo = Math.min(...v), hi = Math.max(...v), W = 90, H = 22;
+        let d = '', pen = false;
+        values.forEach((y, i) => {
+            if (y === null) { pen = false; return; }
+            d += (pen ? 'L' : 'M') + (i / (values.length - 1) * W).toFixed(1) + ',' + (H - 2 - (y - lo) / ((hi - lo) || 1) * (H - 4)).toFixed(1);
+            pen = true;
+        });
+        return `<svg width="${W}" height="${H}"><path d="${d}" fill="none" stroke="#3949ab" stroke-width="1.5"/></svg>`;
+    }
+
+    function render() {
+        const sortVal = r => sortKey === 'attention' ? r.attention.length : r[sortKey];
+        const list = [...shown].sort((a, b) => {
+            const x = sortVal(a), y = sortVal(b);
+            if (x === null) return 1; if (y === null) return -1;
+            return (x > y ? 1 : x < y ? -1 : 0) * (asc ? 1 : -1);
+        });
+        tbody.innerHTML = list.map(r => `
+            <tr onclick="location.href='/patient/${encodeURIComponent(r.id)}'">
+                <td class="id">${r.id}${SYNTHETIC ? '<span class="badge-synthetic sm">Synthetic</span>' : ''}</td>
+                <td>${dash(r.sex)}</td><td>${dash(r.age)}</td><td>${dash(r.ctp)}</td><td>${dash(r.meld)}</td>
+                <td>${r.he ? `<span class="pill ${r.he.toLowerCase()}">${r.he}</span>` : '—'}</td>
+                <td>${dash(r.night_rest)}</td><td>${dash(r.sri)}</td><td>${dash(r.hrv)}</td>
+                <td>${r.steps === null ? '—' : Math.round(r.steps).toLocaleString()}</td>
+                <td class="quality ${r.valid_pct < 70 ? 'low' : ''}">${r.valid_pct}% <span style="color:#94a3b8">of ${r.days}</span></td>
+                <td>${r.attention.length ? `<span class="pill flag" title="Last 7 days worse than usual: ${r.attention.join(', ')}">⚠ ${r.attention.join(', ')}</span>` : ''}</td>
+                <td>${spark(r.spark)}</td>
+            </tr>`).join('');
+        document.getElementById('count').textContent = `${list.length} of ${rows.length} patients`;
+        document.getElementById('empty').hidden = list.length > 0;
+    }
+
+    document.querySelectorAll('#patients th[data-k]').forEach(th => th.addEventListener('click', () => {
+        const k = th.dataset.k;
+        asc = sortKey === k ? !asc : (k !== 'attention'); sortKey = k; render();
+    }));
+
+    // Nudge when the form differs from what's applied
+    const form = document.getElementById('filterForm');
+    const applied = new URLSearchParams(location.search).toString();
+    const current = () => new URLSearchParams([...new FormData(form)].filter(([, v]) => v !== '')).toString();
+    form.addEventListener('input', () => { document.getElementById('pending').hidden = current() === applied; });
+    form.addEventListener('submit', () => {  // drop empty fields so the URL stays short
+        [...form.elements].forEach(el => { if (el.name && !el.value) el.disabled = true; });
+    });
+    render();
+})();
+</script>
+{% endblock %}

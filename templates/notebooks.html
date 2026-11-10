@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Notebooks · HE Dashboard{% endblock %}
+{% block content %}
+<h1>Notebooks</h1>
+<p class="sub">Exploratory analyses behind this dashboard. They open in JupyterLab, where you can also chat with Jupyter AI.</p>
+{% if public_demo %}
+<div class="card">
+    <h2>Not available in the public demo</h2>
+    <p class="hint" style="margin:0">The notebooks run in JupyterLab on a study team member's own computer, next to the de-identified study file, so they aren't hosted here. Their blank source (<code>notebooks/*.py</code>, no outputs) is in the code repository.</p>
+</div>
+{% else %}
+
+<div class="notice" id="jupyterNotice" hidden>
+    JupyterLab doesn't seem to be running at <code>{{ jupyter_base }}</code>. Start it from this repo's folder:
+    <code>jupyter lab --port 8888</code>
+</div>
+
+<div class="card">
+    {% for nb in notebooks %}
+    <div class="nb-row">
+        <div class="nb-icon">ipynb</div>
+        <div style="flex:1">
+            <div class="nb-name">{{ nb.name }}</div>
+            <div class="nb-meta">{{ nb.folder }}/{{ nb.file }} · updated {{ nb.modified }} · {{ nb.size_kb }} KB</div>
+        </div>
+        {% if nb.url %}<a class="btn primary" href="{{ nb.url }}" target="_blank" rel="noopener">Open in JupyterLab</a>
+        {% else %}<span class="nb-meta">outside JupyterLab root</span>{% endif %}
+    </div>
+    {% else %}
+    <p class="hint" style="margin:0">No notebooks yet. Notebooks are stored as <code>.py</code> files (no data, safe for Git). To create the runnable copies, run
+        <code>jupytext --to ipynb notebooks/*.py</code> in a terminal, then refresh this page.</p>
+    {% endfor %}
+</div>
+
+<div class="card">
+    <h2>Privacy</h2>
+    <p class="hint" style="margin:0">Notebook <code>.ipynb</code> files contain outputs drawn from study data, so Git ignores them. Only the blank <code>.py</code> versions in <code>notebooks/</code> are committed.</p>
+</div>
+
+<script>
+fetch('{{ jupyter_base }}/api', {mode: 'no-cors'}).catch(() => { document.getElementById('jupyterNotice').hidden = false; });
+</script>
+{% endif %}
+{% endblock %}
