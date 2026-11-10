@@ -12,7 +12,7 @@ A hosted copy lets collaborators click through the dashboard without installing 
 | `HE_DATA_FILE`, `HE_SYNTHETIC_FILE` | read | ignored, never opened |
 | `HE_DATA_SOURCE=study`, `HE_MRN_MAP` | used | the app refuses to start |
 | Binds to | `127.0.0.1` only | `HOST` / `PORT` from the environment (gunicorn binds `0.0.0.0:$PORT` in the container) |
-| Banner | amber "synthetic demo data" when there's no study file | "Public demo: every patient is synthetic" on every page; nav reads "Public demo · synthetic data only" |
+| Banner | amber "synthetic demo data" when there's no study file | no banner; the nav shows a "Public demo · synthetic data" pill whose tooltip says every patient is synthetic |
 | Notebooks tab | lists local `.ipynb` files, links to JupyterLab on `localhost` | explains that notebooks run locally; no file list, no localhost links |
 | Cohort → Export → New notebook | writes an `.ipynb` to disk | hidden, `POST /api/cohort/notebook` returns 404 |
 | Cohort → Export → PDF report | works | works (print to PDF in the visitor's browser) |
@@ -91,7 +91,7 @@ Before deploying:
 
 After deploying, on the live URL:
 
-- [ ] Every page shows the "Public demo" banner and the nav says "Public demo · synthetic data only".
+- [ ] Every page shows the "Public demo · synthetic data" pill in the nav, and hovering it explains that every patient is synthetic.
 - [ ] Patient IDs are all `DEMO-xx`; the Patients tab shows 24 patients.
 - [ ] Notebooks tab says "Not available in the public demo"; Cohort → Export has only "PDF report".
 - [ ] `https://<url>/ehr/launch?iss=https://example.com` returns 404.

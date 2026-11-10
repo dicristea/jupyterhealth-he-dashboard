@@ -277,7 +277,9 @@ def test_public_demo_pages_hide_local_only_features(public_demo, tmp_path):
     res = client.get("/")
     home = res.data.decode()
     assert res.headers["X-Robots-Tag"] == "noindex, nofollow"
-    assert "Public demo" in home and "synthetic data only" in home and "Local only" not in home
+    assert "Public demo · synthetic data<span" in home and "Local only" not in home
+    assert 'role="tooltip"' in home and "nothing you see describes a real person" in home
+    assert 'class="banner"' not in home
     cohort = client.get("/cohort").data.decode()
     assert 'id="exportNb"' not in cohort and 'id="exportPdf"' in cohort
     nbs = client.get("/notebooks").data.decode()
