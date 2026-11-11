@@ -181,4 +181,4 @@ HE_DATA_SOURCE=synthetic HE_SYNTHETIC_FILE=/path/to/your.csv.gz python app.py
 - **Unlinked wearable measures.** Steps aren't tied to the activity classes or MET; HRV, heart rate and SpO₂ aren't tied to each other or to rest. SpO₂ is missing on random days, whereas in practice availability usually depends on the ring model and settings, so it is missing for whole participants.
 - **Idealised rest.** One unbroken rest bout per night, no naps, no daytime rest, no wake bouts; the ring-off gap is always one block.
 - **Not a model of the study cohort.** Sizes, prevalences and effect sizes were chosen to make every part of the dashboard show something, not to resemble any real population.
-- The analysis notebooks in `notebooks/` read the study `.rds` file directly and do not run on synthetic data.
+- The analysis notebooks in `notebooks/` run on this data with `HE_DATA_SOURCE=synthetic` (see the README's Notebooks section). Whatever they "find" comes from the [built-in relationships](#built-in-relationships) above.

@@ -11,6 +11,9 @@
         <div class="menu-list" id="exportMenu" hidden>
             <button id="exportPdf">PDF report<small>All measures for this comparison; opens print → Save as PDF</small></button>
             {% if not public_demo %}<button id="exportNb">New notebook<small>Pre-filled with this cohort, opens in JupyterLab</small></button>{% endif %}
+            <button id="exportNbDownload">Download notebook (.ipynb)<small>Stores this cohort's filters, not patient IDs{% if public_demo %}; runs on synthetic data{% endif %}</small></button>
+            {% if public_demo %}<button id="exportLite">Open in browser (JupyterLite)<small>Runs the notebook in your browser, nothing to install</small></button>
+            <p class="menu-note">The download also opens in <a href="{{ lite_url }}" target="_blank" rel="noopener">JupyterLite</a> or <a href="{{ binder_url }}" target="_blank" rel="noopener">Binder</a>: upload it into the <code>notebooks/</code> folder there, or into <code>notebooks/</code> of a clone of the repo.</p>{% endif %}
         </div>
     </div>
 </div>
@@ -110,6 +113,17 @@
 
     document.getElementById('exportPdf').addEventListener('click', () => {
         window.open('/cohort/report?' + qs({group: currentGroup()}), '_blank');
+    });
+    const NB_NAME = {{ nb_name | tojson }}, LITE_URL = {{ lite_url | tojson }};
+    document.getElementById('exportNbDownload').addEventListener('click', () => {
+        location.href = '/api/cohort/notebook.ipynb?' + qs({group: currentGroup()});
+    });
+    // JupyterLite names the fetched file after the URL's last segment, query string and all, so the
+    // filters travel base64url-encoded in the path; fromURLToFolder puts it next to data.py's folder.
+    document.getElementById('exportLite')?.addEventListener('click', () => {
+        const token = btoa(qs({group: currentGroup()})).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const src = `${location.origin}/api/cohort/notebook/${token}/${NB_NAME}`;
+        window.open(LITE_URL + '?' + new URLSearchParams({fromURL: src, fromURLToFolder: 'notebooks'}), '_blank', 'noopener');
     });
     document.getElementById('exportNb')?.addEventListener('click', async () => {
         const res = await fetch('/api/cohort/notebook', {method: 'POST', headers: {'Content-Type': 'application/json'},

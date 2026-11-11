@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import urllib.error
 import urllib.parse
@@ -32,6 +33,19 @@ JUPYTER_BASE_URL = os.environ.get("JUPYTER_BASE_URL", "http://localhost:8888")
 JUPYTER_ROOT = Path(os.environ.get("JUPYTER_ROOT", HERE)).expanduser().resolve()
 NOTEBOOK_DIRS = [Path(p).expanduser().resolve() for p in
                  os.environ.get("NOTEBOOK_DIRS", str(HERE / "notebooks")).split(os.pathsep) if p]
+# Public demo Notebooks tab: links to the public repo's notebooks on Binder and JupyterLite (docs/hosting.md).
+NOTEBOOK_REPO = os.environ.get("NOTEBOOK_REPO", "dicristea/ehr-wearable-he-dashboard")
+NOTEBOOK_REF = os.environ.get("NOTEBOOK_REF", "main")
+JUPYTERLITE_URL = os.environ.get("JUPYTERLITE_URL", "https://dicristea.github.io/ehr-wearable-he-dashboard").rstrip("/")
+# Written out rather than globbed: the Docker image holds no notebooks/ folder, and a test keeps this in step with it.
+DEMO_NOTEBOOKS = [
+    {"name": "deid_oura_data_exploration", "title": "Getting to know the dataset",
+     "description": "A beginner-friendly tour: who is in the cohort, how complete each patient's data is, "
+                    "and what the sleep and activity measures look like."},
+    {"name": "he_trajectories_phenotypes", "title": "Trajectories and phenotypes",
+     "description": "How groups of patients (for example decompensated vs. compensated) compare across the "
+                    "study days, and whether patients cluster into a few recognisable types."},
+]
 if data.PUBLIC_DEMO:
     data.load()  # a misconfigured demo (study source, MRN map) should fail the deploy, not the first visitor
 # Optional shared password for the hosted demo (docs/hosting.md). Off unless DEMO_PASSWORD is set.
@@ -240,7 +254,8 @@ def _selection(args) -> dict:
 @app.route("/cohort")
 def cohort():
     sel = _selection(request.args)
-    return render_template("cohort.html", active="cohort", summary=data.cohort_summary(sel["ids"]), sel=sel)
+    return render_template("cohort.html", active="cohort", summary=data.cohort_summary(sel["ids"]), sel=sel,
+                           nb_name=_notebook_name(sel), lite_url=LITE_URL, binder_url=EXPORT_BINDER_URL)
 
 
 @app.route("/api/cohort")
@@ -264,6 +279,56 @@ def cohort_report():
                            comparisons=comparisons, generated=datetime.now().strftime("%b %d, %Y %H:%M"))
 
 
+# Notebook export. Two ways out: POST writes the file next to local JupyterLab (local only); GET returns the
+# same notebook as a download and never touches disk (local and public demo). The GET also serves JupyterLite's
+# `?fromURL=`, which fetches cross-origin and names the file after the URL's last path segment, query string
+# included, so that link carries the filters base64url-encoded in the path instead.
+LITE_URL = f"{JUPYTERLITE_URL}/lab/index.html"
+EXPORT_BINDER_URL = (f"https://mybinder.org/v2/gh/{NOTEBOOK_REPO}/{urllib.parse.quote(NOTEBOOK_REF, safe='')}"
+                     "?urlpath=lab/tree/notebooks")
+NOTEBOOK_CORS_ORIGINS = {o.strip().rstrip("/") for o in
+                         os.environ.get("NOTEBOOK_CORS_ORIGINS", "https://dicristea.github.io").split(",") if o.strip()}
+MAX_EXPORT_QUERY = 2000  # filters only: anything longer isn't a cohort selection
+
+
+def _notebook_name(sel: dict) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", sel["label"].lower()).strip("-")[:60].strip("-")
+    return f"cohort-{slug or 'all-patients'}.ipynb"
+
+
+def _export_args(token: str | None):
+    if token is None:
+        raw, args = request.query_string, request.args
+    else:
+        try:
+            raw = base64.b64decode(token + "=" * (-len(token) % 4), altchars=b"-_", validate=True)
+            args = dict(urllib.parse.parse_qsl(raw.decode()))
+        except (ValueError, UnicodeDecodeError):
+            abort(404)
+    if len(raw) > MAX_EXPORT_QUERY:
+        abort(414)
+    return args
+
+
+@app.route("/api/cohort/notebook.ipynb")
+@app.route("/api/cohort/notebook/<token>/<name>")
+def cohort_notebook_download(token: str | None = None, name: str | None = None):
+    if name is not None and not name.endswith(".ipynb"):
+        abort(404)
+    args = _export_args(token)
+    sel = _selection(args)
+    group = args.get("group", "decomp")
+    if group not in data.cohort_summary(sel["ids"])["groups"]:
+        abort(400)
+    res = Response(nbformat.writes(_build_cohort_notebook(sel, group)), mimetype="application/x-ipynb+json")
+    res.headers["Content-Disposition"] = f'attachment; filename="{_notebook_name(sel)}"'
+    res.headers["Cache-Control"] = "no-store"
+    res.headers["Vary"] = "Origin"
+    if request.headers.get("Origin", "").rstrip("/") in NOTEBOOK_CORS_ORIGINS:
+        res.headers["Access-Control-Allow-Origin"] = request.headers["Origin"]
+    return res
+
+
 @app.route("/api/cohort/notebook", methods=["POST"])
 def cohort_notebook():
     _local_only()
@@ -283,24 +348,38 @@ def cohort_notebook():
     return jsonify({"file": path.name, "url": url})
 
 
+def _md_text(text: str) -> str:
+    """Filter text (the patient-ID search is free text) as inert Markdown: one line, no markup or HTML."""
+    return re.sub(r"([\\`*_{}\[\]()#+\-.!|<>~&$])", r"\\\1", " ".join(text.split()))
+
+
 def _build_cohort_notebook(sel: dict, group: str) -> nbformat.NotebookNode:
     # The notebook stores the filter rules, not patient IDs, and re-selects patients when run.
+    # Filter values reach code cells only through repr() of a str -> str dict, so they stay data.
     nb = nbformat.v4.new_notebook()
     nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
     group_label = data.cohort_summary(sel["ids"])["groups"][group]
+    filters = {str(k): str(v) for k, v in sel["params"].items()}
+    if data.PUBLIC_DEMO:
+        where = ("Exported from the **public demo**, so it runs on **synthetic data**: `data.load()` finds no study "
+                 "file in Binder, JupyterLite or a fresh clone and builds the same 24 synthetic patients the demo "
+                 "shows. Run it from the repo's `notebooks/` folder (in JupyterLite, upload it into `notebooks/`).")
+    else:
+        where = ("Each cell recomputes with `data.load()`: the local study file if this computer has one, otherwise "
+                 "synthetic data. 🔒 Don't commit this notebook with outputs.")
     nb.cells = [
         nbformat.v4.new_markdown_cell(
-            f"# Cohort export: {sel['label']}\n\n"
+            f"# Cohort export: {_md_text(sel['label'])}\n\n"
             f"Exported from the HE Clinician Dashboard on {datetime.now():%b %d, %Y %H:%M}. "
-            f"Comparison: **{group_label}**.\n\n"
-            "Each cell recomputes from the local study file, so re-run to refresh. "
-            "Exploratory and unadjusted. 🔒 Don't commit this notebook with outputs."),
+            f"Comparison: **{_md_text(group_label)}**.\n\n{where} Exploratory and unadjusted."),
         nbformat.v4.new_code_cell(
-            "import sys\nsys.path.insert(0, '..')  # the dashboard's data.py\n"
+            "import sys\nfrom pathlib import Path\n"
+            "# the dashboard's data.py: repo root, one folder up from notebooks/ (or here, if saved next to it)\n"
+            "sys.path.insert(0, '.' if Path('data.py').exists() and not Path('../data.py').exists() else '..')\n"
             "import pandas as pd, matplotlib.pyplot as plt\nimport data\n\n"
-            f"FILTERS = {json.dumps(sel['params'])}  # same filters as the Patients tab\n"
+            f"FILTERS = {filters!r}  # same filters as the Patients tab\n"
             f"GROUP = {group!r}\n"
-            "ids = data.select_ids(**FILTERS) if FILTERS else None\n"
+            "ids = data.select_ids(FILTERS) if FILTERS else None\n"
             "df, source = data.load()\n"
             "print(f'{len(ids) if ids is not None else df.name.nunique()} patients (data: {source})')"),
         nbformat.v4.new_markdown_cell("## Summary"),
@@ -340,9 +419,59 @@ def _build_cohort_notebook(sel: dict, group: str) -> nbformat.NotebookNode:
 
 @app.route("/notebooks")
 def notebooks():
-    return render_template("notebooks.html", active="notebooks",
-                           notebooks=[] if data.PUBLIC_DEMO else _list_notebooks(),
+    if data.PUBLIC_DEMO:
+        return render_template("notebooks.html", active="notebooks", notebooks=_demo_notebooks(),
+                               synthetic_doc=f"https://github.com/{NOTEBOOK_REPO}/blob/{NOTEBOOK_REF}/docs/synthetic-data.md",
+                               repo_url=f"https://github.com/{NOTEBOOK_REPO}")
+    return render_template("notebooks.html", active="notebooks", notebooks=_list_notebooks(),
                            jupyter_base=JUPYTER_BASE_URL, notebook_dirs=NOTEBOOK_DIRS)
+
+
+def _demo_notebooks() -> list[dict]:
+    ref = urllib.parse.quote(NOTEBOOK_REF, safe="")
+    return [{**nb,
+             "view_url": f"/notebooks/view/{nb['name']}",  # pre-run copies baked into the demo image
+             "lite_url": f"{JUPYTERLITE_URL}/lab/index.html?path=notebooks/{nb['name']}.ipynb",
+             "binder_url": f"https://mybinder.org/v2/gh/{NOTEBOOK_REPO}/{ref}"
+                           f"?urlpath=lab/tree/notebooks/{nb['name']}.ipynb"}
+            for nb in DEMO_NOTEBOOKS]
+
+
+# Read-only notebook pages for the public demo, rendered on synthetic data in the Docker builder stage
+# (scripts/render_notebooks.py, same names). The app never runs a notebook; it only serves these files.
+RENDERED_DIR = HERE / "rendered_notebooks"
+RENDERED_NOTEBOOKS = {nb["name"]: nb["title"] for nb in DEMO_NOTEBOOKS}  # the allowlist
+# The page is static: no scripts, no requests anywhere, sandboxed even when opened outside the iframe.
+NOTEBOOK_CSP = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; "
+                "form-action 'none'; frame-ancestors 'self'; sandbox allow-top-navigation-by-user-activation")
+
+
+def _rendered_notebook(name: str) -> Path | None:
+    """The pre-rendered page for an allowlisted name, or None. Local mode never serves these."""
+    if not data.PUBLIC_DEMO or name not in RENDERED_NOTEBOOKS:
+        return None
+    path = RENDERED_DIR / f"{name}.html"
+    return path if path.is_file() else None
+
+
+@app.route("/notebooks/view/<name>")
+def notebook_view(name):
+    if name not in RENDERED_NOTEBOOKS:
+        abort(404)
+    available = _rendered_notebook(name) is not None
+    return render_template("notebook_view.html", active="notebooks", name=name, title=RENDERED_NOTEBOOKS[name],
+                           available=available), 200 if available else 404
+
+
+@app.route("/notebooks/view/<name>/page")
+def notebook_page(name):
+    path = _rendered_notebook(name)
+    if path is None:
+        abort(404)
+    res = Response(path.read_bytes(), mimetype="text/html")
+    res.headers.update({"Content-Security-Policy": NOTEBOOK_CSP, "X-Frame-Options": "SAMEORIGIN",
+                        "X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=3600"})
+    return res
 
 
 def _list_notebooks() -> list[dict]:

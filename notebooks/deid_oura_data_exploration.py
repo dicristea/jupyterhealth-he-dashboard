@@ -21,7 +21,7 @@
 # 3. What sleep looks like, and whether it differs between men and women.
 # 4. Whether there is any menstrual-cycle information.
 # 5. Which parameters from the current Oura Clinical Workbench actually exist
-#    in the real data, so the next dashboard only shows what we really have.
+#    in the data, so the next dashboard only shows what we really have.
 #
 # **How to run it in VS Code:** open this file and click **Run Cell** above
 # each `# %%` block, or **Run All**. If VS Code asks for a kernel, pick your
@@ -31,6 +31,44 @@
 # > notebook and all of its outputs in your JupyterHealth folder. **Do not
 # > commit an `.ipynb` file with outputs to GitHub**, because the outputs
 # > contain the data. Only this blank `.py` version is safe to share.
+
+# %% [markdown]
+# ## Data source
+#
+# Same switch as the dashboard: set **`HE_DATA_SOURCE`** before starting
+# Jupyter.
+#
+# * `auto` (default): the study data if `JH_DATA_DIR` is set or there is
+#   exactly one `.rds` in `../../de-identified data/`, otherwise the synthetic
+#   cohort.
+# * `study`: the study data folder only.
+# * `synthetic`: the synthetic cohort from the dashboard's `data.py`. No R, no
+#   study file.
+#
+# > ⚠️ **On synthetic data, every result in this notebook is an artefact of
+# > the generator's settings, not a clinical finding.** Group differences,
+# > p-values and correlations show what the generator was told to build. See
+# > [docs/synthetic-data.md](../docs/synthetic-data.md).
+
+# %%
+import os
+from pathlib import Path
+
+DATA_SOURCE = os.environ.get("HE_DATA_SOURCE", "auto").strip().lower()
+if DATA_SOURCE not in {"auto", "study", "synthetic"}:
+    raise ValueError("HE_DATA_SOURCE must be auto, study or synthetic")
+if DATA_SOURCE == "auto":
+    found_rds = sorted(Path("../../de-identified data").glob("*.rds"))
+    DATA_SOURCE = "study" if os.environ.get("JH_DATA_DIR") or len(found_rds) == 1 else "synthetic"
+SYNTHETIC = DATA_SOURCE == "synthetic"
+print("Data source:", DATA_SOURCE)
+if SYNTHETIC:
+    print("⚠️  SYNTHETIC DATA. Every result below is an artefact of the generator settings "
+          "(docs/synthetic-data.md), not a clinical finding.")
+    # The repo folder (it holds the dashboard's data.py), whether Jupyter started in notebooks/ or the repo
+    REPO = next((p for p in (Path.cwd(), *Path.cwd().parents) if (p / "data.py").exists()), None)
+    if REPO is None:
+        raise FileNotFoundError("Can't find the dashboard's data.py: run this notebook from the repo or its notebooks/ folder.")
 
 # %% [markdown]
 # ## Step 0 · Tools we need
@@ -78,22 +116,28 @@ SEX_COLORS = {"Female": "#c2185b", "Male": "#1565c0", "Unknown": "#9e9e9e"}
 # `MAX_FULL_LOAD_MB` protects your laptop. Some files, like the heart-rate
 # and HRV files, are 20–30 GB. Anything bigger than this limit gets only a
 # **peek** at its first rows instead of being fully loaded.
+#
+# On synthetic data there is no folder: Step 3 takes the table from the
+# dashboard's `data.py`, and summary tables are saved to `notebook_outputs/`
+# in the repo, which git ignores.
 
 # %%
-# Default: the "de-identified data" folder that sits next to the repo (JupyterHealth/de-identified data)
-DATA_DIR = Path(os.environ.get("JH_DATA_DIR", "../../de-identified data")).expanduser().resolve()
-
 # Optional: if the auto-pick in Step 3 chooses the wrong files, type the file names here.
 DAY_FILE = None          # e.g. "daily_summary.csv": one row per participant per day
 PARTICIPANT_FILE = None  # e.g. "participants.csv": one row per participant
 
 MAX_FULL_LOAD_MB = 500
 
-# Where summary tables get saved. This is local only and lives next to your data, NOT in the repo.
-OUTPUT_DIR = DATA_DIR.parent / "exploration_outputs"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-print("Looking for data in:", DATA_DIR, "| exists:", DATA_DIR.exists())
+if SYNTHETIC:
+    OUTPUT_DIR = REPO / "notebook_outputs"   # git-ignored, inside the repo
+    OUTPUT_DIR.mkdir(exist_ok=True)
+else:
+    # Default: the "de-identified data" folder that sits next to the repo (JupyterHealth/de-identified data)
+    DATA_DIR = Path(os.environ.get("JH_DATA_DIR", "../../de-identified data")).expanduser().resolve()
+    # Where summary tables get saved. This is local only and lives next to your data, NOT in the repo.
+    OUTPUT_DIR = DATA_DIR.parent / "exploration_outputs"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print("Looking for data in:", DATA_DIR, "| exists:", DATA_DIR.exists())
 
 # %% [markdown]
 # ## Step 2 · What files do we have?
@@ -104,7 +148,11 @@ print("Looking for data in:", DATA_DIR, "| exists:", DATA_DIR.exists())
 # %%
 DATA_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".xls", ".parquet", ".rds", ".json", ".sav", ".dta"}
 
-files = sorted(p for p in DATA_DIR.rglob("*") if p.is_file() and p.suffix.lower() in DATA_EXTENSIONS)
+if SYNTHETIC:
+    print("Synthetic data: no data folder, so there are no files to list.")
+    files = []
+else:
+    files = sorted(p for p in DATA_DIR.rglob("*") if p.is_file() and p.suffix.lower() in DATA_EXTENSIONS)
 inventory = pd.DataFrame({
     "file": [str(p.relative_to(DATA_DIR)) for p in files],
     "type": [p.suffix.lower() for p in files],
@@ -185,6 +233,13 @@ for _, row in inventory.iterrows():
         tables[row["file"]] = read_any(path, nrows=None if row["will_load"] == "full" else 5)
     except Exception as exc:  # keep going if one file fails
         print(f"⚠️  Could not read {row['file']}: {exc}")
+
+if SYNTHETIC:
+    import sys
+    sys.path.insert(0, str(REPO))  # the dashboard's data.py
+    import data
+    tables["synthetic cohort"], origin = data.synthetic_table()
+    print("Synthetic cohort:", origin)
 
 for name, df in tables.items():
     print(f"\n📄 {name}: {df.shape[0]:,} rows × {df.shape[1]} columns")
@@ -948,6 +1003,8 @@ if "temp_dev" in valid:
         plt.show()
     else:
         print("Not enough continuous temperature data in this group for the check.")
+else:
+    print("No temperature column, so the cycle check is skipped.")
 
 # %% [markdown]
 # ## Step 13 · One person over time
@@ -1249,17 +1306,17 @@ for label, where, key in WORKBENCH_PARAMETERS:
                      round((clean.groupby(ID)[col].count() > 0).mean() * 100, 1)))
     else:
         rows.append((label, where, "—", "no", 0.0, 0.0))
-coverage = pd.DataFrame(rows, columns=["workbench parameter", "where it appears", "column in real data",
+coverage = pd.DataFrame(rows, columns=["workbench parameter", "where it appears", "column in this data",
                                        "found?", "% valid days with value", "% people with any value"])
 
-# Things in the real data that the workbench doesn't show yet
+# Things in this data that the workbench doesn't show yet
 CLEANED_TO_ROLE = {"rem_pct": "rem", "deep_pct": "deep", "light_pct": "light", "latency_min": "latency",
                    "efficiency_pct": "efficiency", "total_sleep_h": "total_sleep", "awake_h": "awake"}
 used = {ROLES.get(CLEANED_TO_ROLE.get(k, k)) for _, _, k in WORKBENCH_PARAMETERS} | {ID, DATE, VALID}
 not_in_workbench = [c for c in df.columns if c not in used and c not in {"sex_clean", "is_valid"}]
 
 coverage.to_csv(OUTPUT_DIR / "workbench_parameter_coverage.csv", index=False)
-print("Columns in the real data the workbench doesn't use yet:\n ", ", ".join(map(str, not_in_workbench)) or "none")
+print(f"Columns in the {'synthetic' if SYNTHETIC else 'real'} data the workbench doesn't use yet:\n ", ", ".join(map(str, not_in_workbench)) or "none")
 coverage
 
 # %% [markdown]
@@ -1273,6 +1330,9 @@ def pct(x):
     return f"{x:.0f}%"
 
 lines = [
+    "- **SYNTHETIC DATA.** Generator artefacts, not clinical findings (docs/synthetic-data.md)."
+] if SYNTHETIC else []
+lines += [
     f"- **{df[ID].nunique()} participants**, {len(df):,} participant-days "
     + (f"(study days {df[DATE].min()}–{df[DATE].max()}, no calendar dates); " if DAY_IS_NUMBER
        else f"({df[DATE].min():%b %Y} – {df[DATE].max():%b %Y}); ")
@@ -1293,7 +1353,7 @@ if "p-value" in sex_results:
                  f"{'differ on ' + ', '.join(sig) if sig else 'no clear differences'}.")
 lines.append(f"- Menstrual-cycle columns: {', '.join(menstrual_cols) if menstrual_cols else 'none found'}.")
 found = coverage[coverage['found?'] == 'yes']['workbench parameter'].tolist()
-lines.append(f"- Workbench parameters present in real data: {len(found)}/{len(coverage)}.")
+lines.append(f"- Workbench parameters present in {'synthetic' if SYNTHETIC else 'real'} data: {len(found)}/{len(coverage)}.")
 summary_md = "\n".join(lines)
 (OUTPUT_DIR / "summary_for_team.md").write_text(summary_md)
 print(summary_md)

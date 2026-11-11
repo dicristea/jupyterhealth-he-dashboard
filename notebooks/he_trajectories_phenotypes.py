@@ -30,6 +30,44 @@
 # > `.py` version goes to GitHub.
 
 # %% [markdown]
+# ## Data source
+#
+# Same switch as the dashboard: set **`HE_DATA_SOURCE`** before starting
+# Jupyter.
+#
+# * `auto` (default): the study file if there is exactly one `.rds` in
+#   `../../de-identified data/` (or `JH_DATA_FILE` is set), otherwise the
+#   synthetic cohort.
+# * `study`: the study file only.
+# * `synthetic`: the synthetic cohort from the dashboard's `data.py`. No R, no
+#   study file.
+#
+# > ⚠️ **On synthetic data, every result in this notebook is an artefact of
+# > the generator's settings, not a clinical finding.** Group differences,
+# > p-values and phenotypes show what the generator was told to build. See
+# > [docs/synthetic-data.md](../docs/synthetic-data.md).
+
+# %%
+import os
+from pathlib import Path
+
+DATA_SOURCE = os.environ.get("HE_DATA_SOURCE", "auto").strip().lower()
+if DATA_SOURCE not in {"auto", "study", "synthetic"}:
+    raise ValueError("HE_DATA_SOURCE must be auto, study or synthetic")
+if DATA_SOURCE == "auto":
+    found_rds = sorted(Path("../../de-identified data").glob("*.rds"))
+    DATA_SOURCE = "study" if os.environ.get("JH_DATA_FILE") or len(found_rds) == 1 else "synthetic"
+SYNTHETIC = DATA_SOURCE == "synthetic"
+print("Data source:", DATA_SOURCE)
+if SYNTHETIC:
+    print("⚠️  SYNTHETIC DATA. Every result below is an artefact of the generator settings "
+          "(docs/synthetic-data.md), not a clinical finding.")
+    # The repo folder (it holds the dashboard's data.py), whether Jupyter started in notebooks/ or the repo
+    REPO = next((p for p in (Path.cwd(), *Path.cwd().parents) if (p / "data.py").exists()), None)
+    if REPO is None:
+        raise FileNotFoundError("Can't find the dashboard's data.py: run this notebook from the repo or its notebooks/ folder.")
+
+# %% [markdown]
 # ## Part 1 · Why "before and after clinical events" isn't possible yet
 #
 # **The goal:** line up every patient's resting HR, HRV, sleep and activity on
@@ -77,12 +115,16 @@
 # once (cached outside the repo), then pandas reads it. By default it uses the
 # single `.rds` file in `../../de-identified data/`; set **`JH_DATA_FILE`** if
 # your copy lives somewhere else.
+#
+# On synthetic data the table comes from the dashboard's `data.py` instead
+# (`synthetic_data/synthetic_he.csv.gz` if you generated one, otherwise the
+# default in-memory cohort), and files are saved to `notebook_outputs/` in the
+# repo, which git ignores.
 
 # %%
-import os
 import re
 import subprocess
-from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
@@ -105,10 +147,16 @@ def default_data_file(folder: Path = Path("../../de-identified data")) -> Path:
     return found[0]
 
 
-DATA_FILE = Path(os.environ.get("JH_DATA_FILE") or default_data_file()).expanduser().resolve()
-CACHE_DIR = DATA_FILE.parent.parent / "exploration_outputs" / "_cache"   # outside the repo
-OUTPUT_DIR = CACHE_DIR.parent
-print("Data file:", DATA_FILE, "| exists:", DATA_FILE.exists())
+if SYNTHETIC:
+    sys.path.insert(0, str(REPO))  # the dashboard's data.py
+    import data
+    OUTPUT_DIR = REPO / "notebook_outputs"   # git-ignored, inside the repo
+    OUTPUT_DIR.mkdir(exist_ok=True)
+else:
+    DATA_FILE = Path(os.environ.get("JH_DATA_FILE") or default_data_file()).expanduser().resolve()
+    CACHE_DIR = DATA_FILE.parent.parent / "exploration_outputs" / "_cache"   # outside the repo
+    OUTPUT_DIR = CACHE_DIR.parent
+    print("Data file:", DATA_FILE, "| exists:", DATA_FILE.exists())
 
 R_TO_CSV = r"""
 args <- commandArgs(trailingOnly = TRUE)
@@ -129,7 +177,13 @@ def load_rds(path: Path) -> pd.DataFrame:
     return pd.read_csv(cache, low_memory=False, dtype={"class_5_min": str, "name": str})
 
 
-df = load_rds(DATA_FILE).sort_values(["name", "days_since_start"]).reset_index(drop=True)
+if SYNTHETIC:
+    raw, origin = data.synthetic_table()
+    print("Synthetic cohort:", origin)
+else:
+    raw = load_rds(DATA_FILE)
+df = raw.sort_values(["name", "days_since_start"]).reset_index(drop=True)
+del raw
 print(f"{df['name'].nunique()} participants, {len(df):,} participant-days")
 
 # %% [markdown]
@@ -143,6 +197,9 @@ print(f"{df['name'].nunique()} participants, {len(df):,} participant-days")
 CLINICAL_COLS = ["decomp", "anyhe", "anyOHE", "che_phes", "he_meds", "ever_he_meds", "ascites",
                  "medication_for_ascites", "variceal_bleeding_history", "ctp_class", "meld", "phes_score",
                  "psqiglobal", "cldq_total", "liver_frailty_index"]
+if absent := [c for c in CLINICAL_COLS if c not in df]:
+    print("Not in this data, so not checked:", ", ".join(absent))
+    CLINICAL_COLS = [c for c in CLINICAL_COLS if c in df]
 changes = pd.DataFrame({
     "column": CLINICAL_COLS,
     "people with a value": [df.groupby("name")[c].apply(lambda s: s.notna().any()).sum() for c in CLINICAL_COLS],
@@ -361,15 +418,19 @@ print(f"People with at least one large shift (|z| ≥ 1.5) in any measure: "
 print(big.groupby("measure")["z"].agg(["count", lambda z: (z < 0).sum()]).rename(
     columns={"count": "large shifts", "<lambda_0>": "of which drops"}).to_string())
 
-# Save the candidate list locally (outside the repo) to compare with event dates later
+# Save the candidate list locally (outside the repo, or notebook_outputs/ on synthetic data) to compare with event dates later
 big.sort_values(["name", "study_day"]).to_csv(OUTPUT_DIR / "candidate_change_points.csv", index=False)
 
-fig, ax = plt.subplots(figsize=(9, 3))
-for m, color in zip(big["measure"].unique(), ["#2563eb", "#d97706", "#16a34a", "#9333ea"]):
-    ax.hist(big.loc[big["measure"] == m, "study_day"], bins=18, range=(0, 180), alpha=0.5, label=m, color=color)
-ax.set(title="When do the large shifts happen?", xlabel="study day", ylabel="number of shifts")
-ax.legend(fontsize=8)
-plt.show()
+if big.empty:
+    print("No large shifts, so there is nothing to place on the study timeline."
+          + (" Expected on synthetic data: the generator has no events or trends." if SYNTHETIC else ""))
+else:
+    fig, ax = plt.subplots(figsize=(9, 3))
+    for m, color in zip(big["measure"].unique(), ["#2563eb", "#d97706", "#16a34a", "#9333ea"]):
+        ax.hist(big.loc[big["measure"] == m, "study_day"], bins=18, range=(0, 180), alpha=0.5, label=m, color=color)
+    ax.set(title="When do the large shifts happen?", xlabel="study day", ylabel="number of shifts")
+    ax.legend(fontsize=8)
+    plt.show()
 
 
 # %% [markdown]
@@ -410,7 +471,10 @@ def pre_post_plot(events: pd.DataFrame, metrics=("night_rest_h", "average_hrv", 
 
 
 drops = big[(big["measure"] == METRICS["night_rest_h"]) & (big["z"] < 0)]
-pre_post_plot(drops, title="Around candidate night-rest drops (NOT clinical events)")
+if drops.empty:
+    print("No candidate night-rest drops, so the pre/post plot is skipped.")
+else:
+    pre_post_plot(drops, title="Around candidate night-rest drops (NOT clinical events)")
 
 # When real events arrive:
 # events = pd.read_csv("path/to/event_table.csv")   # columns: name, study_day, event_type
@@ -540,11 +604,13 @@ pd.DataFrame(label_rows)
 # ## Part 6 · Summary
 #
 # Counts and medians only, no individual rows. It's saved next to the
-# exploration notebook's summary, outside the repo.
+# exploration notebook's summary, outside the repo (on synthetic data, in the
+# git-ignored `notebook_outputs/`).
 
 # %%
 lines = [
-    "**Trajectories & phenotypes: HE study, de-identified file**",
+    "**Trajectories & phenotypes: SYNTHETIC cohort. Generator artefacts, not clinical findings "
+    "(docs/synthetic-data.md)**" if SYNTHETIC else "**Trajectories & phenotypes: HE study, de-identified file**",
     f"- Clinical columns are baseline-only: {int((changes['people whose value changes over time'] == 0).sum())}"
     f"/{len(changes)} never change within a person, so pre/post-event plots need an event table "
     "(name + study day) from the study team or the EHR.",

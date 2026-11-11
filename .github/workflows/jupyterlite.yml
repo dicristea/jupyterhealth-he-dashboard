@@ -1,0 +1,48 @@
+# Builds the JupyterLite site (notebooks in the browser, synthetic data only) and deploys it to GitHub Pages.
+# Runs only in the public repo; see docs/jupyterlite.md.
+name: JupyterLite
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'dicristea/ehr-wearable-he-dashboard'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: lite/requirements-build.txt
+      - name: Install build tools
+        run: pip install -r lite/requirements-build.txt
+      - name: Build
+        run: PYTHON=python scripts/build_jupyterlite.sh
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    if: github.repository == 'dicristea/ehr-wearable-he-dashboard'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

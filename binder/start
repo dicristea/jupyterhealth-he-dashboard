@@ -1,0 +1,4 @@
+#!/bin/bash
+# Binder never has the study file: make the notebooks load the generated synthetic cohort.
+export HE_DATA_SOURCE=synthetic
+exec "$@"

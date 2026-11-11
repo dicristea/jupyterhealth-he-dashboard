@@ -246,6 +246,18 @@ def synthetic_cohort(n: int = 24, seed: int = 7, min_days: int = 90, max_days: i
     return pd.DataFrame(rows)
 
 
+def synthetic_table() -> tuple[pd.DataFrame, str]:
+    """Raw synthetic participant-days for the notebooks, and where they came from.
+
+    SYNTHETIC_FILE if it exists, otherwise the default in-memory cohort (unlike load(), which needs
+    the file when HE_DATA_SOURCE=synthetic). The public demo always uses the in-memory cohort.
+    """
+    if not PUBLIC_DEMO and SYNTHETIC_FILE.exists():
+        return (pd.read_csv(SYNTHETIC_FILE, low_memory=False, dtype={"class_5_min": str, "name": str, "met_5min": str}),
+                str(SYNTHETIC_FILE))
+    return synthetic_cohort(), "data.synthetic_cohort() with the default settings (seed 7)"
+
+
 _bout_re = re.compile(r"1(?:[0-5]{0,2}1)*")
 _win_start, _win_end = (18 - DAY_STARTS_AT) * 12, SLOTS + (12 - DAY_STARTS_AT) * 12
 

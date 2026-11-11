@@ -17,6 +17,7 @@ exploration_outputs/
 _cache/
 data/
 synthetic_data/
+notebook_outputs/
 *.tsv
 *.json.gz
 *.zip
@@ -63,7 +64,16 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
+# JupyterLite build (scripts/build_jupyterlite.sh): output, staging, caches
+_site/
+.jupyterlite_build/
+.jupyterlite_cache/
+.jupyterlite.doit.db
+
 # OS / editors
 .DS_Store
 .idea/
 .vscode/
+
+# Read-only notebook pages, built in the Docker builder stage (scripts/render_notebooks.py). Never commit.
+rendered_notebooks/

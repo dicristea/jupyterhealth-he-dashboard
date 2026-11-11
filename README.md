@@ -1,5 +1,7 @@
 # HE Clinician Dashboard
 
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/dicristea/ehr-wearable-he-dashboard/main?urlpath=lab/tree/notebooks)
+
 A simpler, clinician-facing dashboard for a hepatic encephalopathy (HE) study in which patients with cirrhosis wear an Oura ring, built at Cornell Tech with JupyterHealth.
 
 Patients with cirrhosis in the study wear an Oura ring. This app turns the ring's daily export into views a clinician can read in a few minutes: who looks worse than usual this week, what one patient's rest and activity look like over time, and how groups of patients (for example compensated vs. decompensated) compare. It was designed together with the study's clinician, a hepatologist at Weill Cornell Medicine, and it shows only what the study data actually contains (no sleep stages, no labs, no event dates).
@@ -15,8 +17,8 @@ It's a slimmed-down companion to the research prototype [oura-clinical-workbench
 | Tab | What it shows |
 |---|---|
 | **Patients** (`/`) | Sortable patient list with filters (patient ID, HE status, Child-Pugh, decompensated, ascites, HE meds, etiology, sex, age and MELD ranges, minimum valid days, *needs attention*). Filters apply together with **Apply filters**, and the summary bar then describes the filtered cohort. *Needs attention* = last 7 days worse than the patient's own 10–90% range on any profile measure. **Open as cohort →** sends the filtered patients to the Cohort tab. Click a patient for their profile, modelled on a Medplum patient dashboard demo: a header with a synthetic badge, a summary row (night rest, regularity, midpoint, ring wear coverage), measure cards (last 7 days vs. the patient's own usual range, with trend), a 24-hour MET activity profile, time in activity classes, a 1/3/7-day MET activity explorer, and a rest/activity actogram. |
-| **Cohort** (`/cohort`) | All patients, or the selection sent from the Patients tab. Compare groups (this selection vs. the rest of the cohort, decompensation, covert or overt HE, Child-Pugh, HE meds, ascites, sex) on any measure: weekly trajectories plus one dot per patient, with a Mann-Whitney test. **Export ▾**: a PDF report of every measure (print → Save as PDF), or a new pre-filled notebook that opens in JupyterLab (local only). |
-| **Notebooks** (`/notebooks`) | The exploratory Jupyter notebooks behind the dashboard, opened in JupyterLab (with Jupyter AI if installed). |
+| **Cohort** (`/cohort`) | All patients, or the selection sent from the Patients tab. Compare groups (this selection vs. the rest of the cohort, decompensation, covert or overt HE, Child-Pugh, HE meds, ascites, sex) on any measure: weekly trajectories plus one dot per patient, with a Mann-Whitney test. **Export ▾**: a PDF report of every measure (print → Save as PDF), a new pre-filled notebook that opens in JupyterLab (local only), or the same notebook as a download (`.ipynb`, stores the filters, not patient IDs). The public demo adds **Open in browser (JupyterLite)**; its notebook runs on synthetic data in a clone, Binder or JupyterLite ([docs/hosting.md](docs/hosting.md#notebook-export-in-the-demo)). |
+| **Notebooks** (`/notebooks`) | The exploratory Jupyter notebooks behind the dashboard, opened in JupyterLab (with Jupyter AI if installed). In the public demo: a read-only copy run on synthetic data, or run them yourself in the browser (JupyterLite) or on Binder. |
 | **EHR launch** (`/ehr`) | Bare-bones SMART on FHIR launch: an EHR (for example Medplum) opens the app on the patient in context, and we match by MRN. Includes a *Simulate launch* tester. Synthetic MRNs only. Walkthrough: [docs/medplum.md](docs/medplum.md). |
 
 ## Quickstart
@@ -52,11 +54,14 @@ ehr-wearable-he-dashboard/
 ├── static/style.css
 ├── scripts/
 │   ├── generate_synthetic_data.py   writes synthetic_data/*.csv.gz
+│   ├── render_notebooks.py          demo image build: runs the notebooks on synthetic data → read-only HTML
 │   └── seed_medplum.py              creates synthetic FHIR Patients in Medplum
 ├── notebooks/*.py         exploratory notebooks, jupytext percent format (no outputs)
 ├── tests/                 pytest, runs on synthetic data only
-├── docs/                  medplum.md, synthetic-data.md, hosting.md
+├── docs/                  medplum.md, synthetic-data.md, hosting.md, jupyterlite.md
+├── lite/, scripts/build_jupyterlite.sh   JupyterLite site (GitHub Pages, synthetic data)
 ├── Dockerfile, .dockerignore, render.yaml   public synthetic demo only
+├── requirements-notebooks.txt   notebook stack for the Dockerfile's builder stage
 └── requirements.txt
 ```
 
@@ -98,7 +103,9 @@ ehr-wearable-he-dashboard/
 | `GET /cohort`, `GET /api/cohort?group=&metric=` | Cohort tab and its JSON |
 | `GET /cohort/report?group=` | Printable report of every measure (default group `decomp`) |
 | `POST /api/cohort/notebook` | Writes a pre-filled `.ipynb` to the first `NOTEBOOK_DIRS` folder (local only) |
+| `GET /api/cohort/notebook.ipynb?group=`, `GET /api/cohort/notebook/<token>/<name>.ipynb` | The same notebook as a download, never written to disk (also in the demo); the second form carries the filters base64url-encoded for JupyterLite's `fromURL`. CORS only for `NOTEBOOK_CORS_ORIGINS` |
 | `GET /notebooks` | Notebooks tab |
+| `GET /notebooks/view/<name>` | Read-only notebook page (public demo only; rendered on synthetic data when the image is built) |
 | `GET /ehr`, `/ehr/launch`, `/ehr/callback`, `/ehr/simulate?mrn=` | SMART on FHIR launch (launch and callback are local only) |
 
 ## How the measures are computed
@@ -161,14 +168,14 @@ Step-by-step setup, compatibility notes (what was and wasn't verified against a 
 
 ## Public demo and hosting
 
-`HE_PUBLIC_DEMO=1` turns the app into a public demo: always the in-memory synthetic cohort, never any data file; notebook export, the Notebooks file list and the real SMART launch routes are off; `X-Robots-Tag: noindex` on every response; Flask debugger off; may bind beyond `127.0.0.1` (`HOST`). Try it locally:
+`HE_PUBLIC_DEMO=1` turns the app into a public demo: always the in-memory synthetic cohort, never any data file; writing notebooks to disk, the Notebooks file list and the real SMART launch routes are off (notebook download and JupyterLite stay on); `X-Robots-Tag: noindex` on every response; Flask debugger off; may bind beyond `127.0.0.1` (`HOST`). Try it locally:
 
 ```bash
 HE_PUBLIC_DEMO=1 python app.py                                         # http://127.0.0.1:5050
 docker build -t he-demo . && docker run --rm -p 127.0.0.1:8000:8000 he-demo   # http://127.0.0.1:8000
 ```
 
-The `Dockerfile` copies only `app.py`, `data.py`, `templates/` and `static/` and runs gunicorn with `HE_PUBLIC_DEMO=1` forced in the start command. `render.yaml` describes one free Render web service. Nothing has been deployed. The full comparison table, deployment steps and the pre-publication checklist are in [docs/hosting.md](docs/hosting.md); the first deploy, click by click, is in [docs/render-quickstart.md](docs/render-quickstart.md).
+The `Dockerfile` has two stages: a builder that runs both notebooks on synthetic data and exports read-only HTML (`scripts/render_notebooks.py`), and the runtime, which copies only `app.py`, `data.py`, `templates/`, `static/` and that HTML and runs gunicorn with `HE_PUBLIC_DEMO=1` forced in the start command. `render.yaml` describes one free Render web service. Nothing has been deployed. The full comparison table, deployment steps and the pre-publication checklist are in [docs/hosting.md](docs/hosting.md); the first deploy, click by click, is in [docs/render-quickstart.md](docs/render-quickstart.md).
 
 ## Notebooks
 
@@ -179,14 +186,26 @@ Notebooks are committed only as [jupytext](https://jupytext.readthedocs.io) perc
 | `notebooks/deid_oura_data_exploration.py` | Beginner-friendly tour of the de-identified dataset: who is in it, completeness, sleep proxies, what exists vs. the research workbench. Reads `JH_DATA_DIR`. |
 | `notebooks/he_trajectories_phenotypes.py` | Group trajectories and individual phenotypes (clustering), and why pre/post-event analysis isn't possible with the current file. Reads `JH_DATA_FILE`. |
 
-Both read the study `.rds` file directly and **do not run on synthetic data**. <!-- TODO: decide whether to add a synthetic-data path to the notebooks for the public repo. -->
+Both use the app's `HE_DATA_SOURCE` switch, set before starting Jupyter: `auto` (default) reads the study data when it finds it (exactly one `.rds` in `../de-identified data/`, or `JH_DATA_DIR` / `JH_DATA_FILE` set) and otherwise the synthetic cohort; `study` needs the study file and R; `synthetic` needs neither. On synthetic data the table comes from `data.py` (`HE_SYNTHETIC_FILE` if it exists, otherwise the default in-memory cohort the public demo shows), summary tables are saved to the git-ignored `notebook_outputs/`, and sections that need columns the synthetic cohort lacks (temperature, sleep stages) say so and skip. **On synthetic data every result, p-values, phenotypes and correlations included, is an artefact of the [generator settings](docs/synthetic-data.md), not a clinical finding.**
+
+### Run the notebooks online (synthetic data)
+
+Without installing anything, from the hosted demo's **Notebooks** tab or directly:
+
+- **Binder**: [launch JupyterLab](https://mybinder.org/v2/gh/dicristea/ehr-wearable-he-dashboard/main?urlpath=lab/tree/notebooks) on free cloud servers; the first start after a change can take a few minutes. `binder/` installs only the notebook stack, generates the default synthetic cohort and converts the `.py` files to blank `.ipynb` (`postBuild`), and sets `HE_DATA_SOURCE=synthetic` (`start`).
+- **JupyterLite**: [the same notebooks running in your browser](https://dicristea.github.io/ehr-wearable-he-dashboard/lab/index.html?path=notebooks/he_trajectories_phenotypes.ipynb) with Pyodide; nothing runs on a server. GitHub Pages builds it from `lite/` on every push to `main` (first visit downloads about 100 MB; [docs/jupyterlite.md](docs/jupyterlite.md)).
+
+Both use only generated data; results are generator artefacts, not clinical findings ([docs/synthetic-data.md](docs/synthetic-data.md)).
+
+### Run them locally
 
 ```bash
 jupytext --to ipynb notebooks/*.py     # make runnable copies (ignored by git)
+HE_DATA_SOURCE=synthetic jupytext --to ipynb --execute notebooks/*.py   # or run them end to end on synthetic data
 jupyter lab --port 8888                # start from the repo folder so the dashboard's links work
 ```
 
-Workflow: edit the `.ipynb` in JupyterLab, then write the changes back with `jupytext --to py:percent notebooks/<name>.ipynb` (the `.py` keeps code and markdown, never outputs; jupytext may also expand the header metadata, which is harmless). Only commit the `.py`. The dashboard's Notebooks tab lists `.ipynb` files in `NOTEBOOK_DIRS` and links them to JupyterLab at `JUPYTER_BASE_URL`; **Cohort → Export → New notebook** writes a pre-filled notebook there that stores the cohort's filters, not patient IDs.
+Workflow: edit the `.ipynb` in JupyterLab, then write the changes back with `jupytext --to py:percent notebooks/<name>.ipynb` (the `.py` keeps code and markdown, never outputs; jupytext may also expand the header metadata, which is harmless). Only commit the `.py`. The dashboard's Notebooks tab lists `.ipynb` files in `NOTEBOOK_DIRS` and links them to JupyterLab at `JUPYTER_BASE_URL`; **Cohort → Export → New notebook** writes a pre-filled notebook there that stores the cohort's filters, not patient IDs; **Download notebook** returns the same file without writing it.
 
 ## Configuration
 
@@ -194,7 +213,7 @@ Every environment variable the code reads:
 
 | Variable | Read by | Default | Meaning |
 |---|---|---|---|
-| `HE_DATA_SOURCE` | `data.py` | `auto` | `auto`, `study` or `synthetic` (see [Data flow](#data-flow)) |
+| `HE_DATA_SOURCE` | `data.py`, both notebooks | `auto` | `auto`, `study` or `synthetic` (see [Data flow](#data-flow)) |
 | `HE_DATA_FILE` | `data.py` | the single `.rds` file in `../de-identified data/` (next to the repo) | Study `.rds` file. With no file, or several, there, set it explicitly |
 | `HE_SYNTHETIC_FILE` | `data.py`, `seed_medplum.py` | `./synthetic_data/synthetic_he.csv.gz` | CSV read when `HE_DATA_SOURCE=synthetic` |
 | `HE_CACHE_DIR` | `data.py` | `<parent of the data folder>/exploration_outputs/_cache` | Where the `.rds` → CSV cache is written |
@@ -208,6 +227,9 @@ Every environment variable the code reads:
 | `JUPYTER_BASE_URL` | `app.py` | `http://localhost:8888` | JupyterLab URL for notebook links |
 | `JUPYTER_ROOT` | `app.py` | the repo folder | Folder JupyterLab was started from (links are relative to it) |
 | `NOTEBOOK_DIRS` | `app.py` | `./notebooks` | Folders (separated by `:`, `;` on Windows) listed in the Notebooks tab; exports go to the first |
+| `NOTEBOOK_REPO`, `NOTEBOOK_REF` | `app.py` | `dicristea/ehr-wearable-he-dashboard`, `main` | GitHub repo and branch the demo Notebooks tab and Cohort export link to on Binder (and for docs links) |
+| `JUPYTERLITE_URL` | `app.py` | `https://dicristea.github.io/ehr-wearable-he-dashboard` | JupyterLite site the demo Notebooks tab and Cohort export (`?fromURL=`) link to |
+| `NOTEBOOK_CORS_ORIGINS` | `app.py` | `https://dicristea.github.io` | Comma-separated origins allowed to fetch exported notebooks cross-origin (JupyterLite) |
 | `SMART_CLIENT_ID` | `app.py` | unset | Client ID from the EHR's app registration |
 | `SMART_CLIENT_SECRET` | `app.py` | unset | Client secret (optional: PKCE is always used) |
 | `SMART_REDIRECT_URI` | `app.py` | `<this app>/ehr/callback` | Must exactly match the registered redirect URI |
@@ -224,7 +246,7 @@ Every environment variable the code reads:
 python -m pytest -q
 ```
 
-32 tests in `tests/test_data.py` and `tests/test_medplum.py`. They point `HE_DATA_FILE` at a non-existent path, so they always run on the synthetic cohort and never need study data, R or a network (Medplum and SMART calls are mocked). They cover the synthetic generator (determinism, schema, overrides, the generator script), study-file discovery, the derived measures, every page and API route, filters and cohort selection, exports, the SMART launch round trip (including Medplum's identifier-in-token variant), Medplum seeding, and public demo mode.
+59 tests in `tests/test_data.py`, `tests/test_medplum.py`, `tests/test_notebooks.py` and `tests/test_rendered_notebooks.py` (about 30 s; executing the two notebooks takes about 15 s of that). They point `HE_DATA_FILE` at a non-existent path, so they always run on the synthetic cohort and never need study data, R or a network (Medplum and SMART calls are mocked). They cover the synthetic generator (determinism, schema, overrides, the generator script), study-file discovery, the derived measures, every page and API route, filters and cohort selection, exports (notebook download, JupyterLite CORS, filter values kept out of code), the SMART launch round trip (including Medplum's identifier-in-token variant), Medplum seeding, public demo mode, both notebooks running end to end on synthetic data, and the read-only notebook pages (allowlist, local vs. demo, the render script refusing anything but synthetic data).
 
 ## Data-safety rules
 
@@ -241,7 +263,7 @@ python -m pytest -q
 - **Exploratory statistics.** Mann-Whitney tests are unadjusted, uncorrected for multiple comparisons and for confounding.
 - **Synthetic data** encodes the generator's assumptions only ([limitations](docs/synthetic-data.md#limitations)).
 - **No authentication**; the SMART launch is a proof of concept not yet tested end to end against a live EHR ([docs/medplum.md](docs/medplum.md)).
-- Data is cached in memory; restart after the data file changes. The notebooks need the study file.
+- Data is cached in memory; restart after the data file changes.
 
 ## Roadmap
 

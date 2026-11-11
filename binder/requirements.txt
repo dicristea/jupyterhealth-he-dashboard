@@ -1,0 +1,9 @@
+# Binder (mybinder.org) image for the two notebooks, on synthetic data only. JupyterLab comes with
+# repo2docker's base environment; Flask and gunicorn aren't needed because the notebooks don't import app.py.
+pandas==3.0.6
+numpy==2.5.4
+scipy==1.18.1
+scikit-learn==1.9.1
+matplotlib==3.11.2
+jupytext==1.19.6
+ipykernel==7.4.0

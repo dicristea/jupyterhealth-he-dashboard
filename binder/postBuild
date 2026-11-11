@@ -1,0 +1,9 @@
+#!/bin/bash
+# Runs once when Binder builds the image, from the repository root. Public repo, synthetic data only.
+set -euo pipefail
+
+# synthetic_data/synthetic_he.csv.gz with the generator defaults (docs/synthetic-data.md).
+python scripts/generate_synthetic_data.py
+
+# Runnable copies of the jupytext sources, without outputs.
+jupytext --to ipynb notebooks/*.py

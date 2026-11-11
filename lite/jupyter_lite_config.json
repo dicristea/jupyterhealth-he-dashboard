@@ -1,0 +1,9 @@
+{
+  "LiteBuildConfig": {
+    "apps": ["lab"],
+    "cache_dir": "../.jupyterlite_cache",
+    "ignore_sys_prefix": ["federated_extensions"],
+    "no_sourcemaps": true,
+    "no_unused_shared_packages": true
+  }
+}

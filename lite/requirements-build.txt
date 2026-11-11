@@ -1,0 +1,13 @@
+# Build-only tools for the JupyterLite site (scripts/build_jupyterlite.sh); not needed to run the app.
+# The Pyodide kernel 0.8.6 runs Pyodide 314.0.6 in the browser (Python 3.14, numpy 2.4, pandas 3.0,
+# scipy 1.18, scikit-learn 1.8, matplotlib 3.10), fetched from the jsDelivr CDN at runtime.
+jupyterlite-core==0.8.6
+jupyterlite-pyodide-kernel==0.8.6
+jupyterlab-open-url-parameter==0.4.0   # ?fromURL= links (cohort export → JupyterLite)
+jupytext==1.19.6
+# jupyter lite build needs it to index the contents (notebooks, data.py, the CSV)
+jupyter-server>=2.14
+# scripts/generate_synthetic_data.py imports data.py
+numpy>=1.26
+pandas>=2.2
+scipy>=1.11

@@ -85,7 +85,76 @@ def test_exports(tmp_path, monkeypatch):
     import nbformat
     nb = nbformat.read(tmp_path / res.get_json()["file"], as_version=4)
     source = "\n".join(c.source for c in nb.cells)
-    assert '"ctp": "Child B"' in source and "DEMO-" not in source  # filters stored, not patient IDs
+    assert "{'ctp': 'Child B'}" in source and "DEMO-" not in source  # filters stored, not patient IDs
+    assert "Don't commit this notebook" in source and "public demo" not in source
+    cohort = client.get("/cohort").data.decode()  # local mode: JupyterLab export plus the download, no Lite link
+    assert 'id="exportNb"' in cohort and 'id="exportNbDownload"' in cohort and 'id="exportLite"' not in cohort
+    res = client.get("/api/cohort/notebook.ipynb?ctp=Child+B&group=decomp")
+    assert res.status_code == 200 and res.headers["Content-Disposition"] == 'attachment; filename="cohort-child-b.ipynb"'
+
+
+def _no_disk_writes(monkeypatch):
+    import nbformat
+    monkeypatch.setattr(nbformat, "write", lambda *a, **k: pytest.fail("export wrote a file"))
+    monkeypatch.setattr(Path, "mkdir", lambda *a, **k: pytest.fail("export made a folder"))
+
+
+def test_public_demo_notebook_download(public_demo, tmp_path):
+    import nbformat
+    import app as app_module
+    public_demo.setattr(app_module, "NOTEBOOK_DIRS", [tmp_path / "nb"])
+    _no_disk_writes(public_demo)
+    client = app.test_client()
+    cohort = client.get("/cohort").data.decode()
+    assert 'id="exportNbDownload"' in cohort and 'id="exportLite"' in cohort and "Binder" in cohort
+    res = client.get("/api/cohort/notebook.ipynb?ctp=Child+B&group=_selection")
+    assert res.status_code == 200 and res.mimetype == "application/x-ipynb+json"
+    assert res.headers["Content-Disposition"] == 'attachment; filename="cohort-child-b.ipynb"'
+    assert "Access-Control-Allow-Origin" not in res.headers  # no Origin, no CORS
+    nb = nbformat.reads(res.data.decode(), as_version=4)
+    nbformat.validate(nb)
+    source = "\n".join(c.source for c in nb.cells)
+    assert "{'ctp': 'Child B'}" in source and "GROUP = '_selection'" in source and "DEMO-" not in source
+    assert "synthetic data" in nb.cells[0].source and "public demo" in nb.cells[0].source
+    assert len(res.data) < 20_000
+    assert not (tmp_path / "nb").exists()
+    assert client.get("/api/cohort/notebook.ipynb?group=nope").status_code == 400
+    assert client.get("/api/cohort/notebook.ipynb?q=" + "x" * 3000).status_code == 414
+
+
+def test_notebook_lite_url_and_cors(public_demo):
+    import base64
+    import app as app_module
+    _no_disk_writes(public_demo)
+    client = app.test_client()
+    token = base64.urlsafe_b64encode(b"ctp=Child+B&group=decomp").decode().rstrip("=")
+    url = f"/api/cohort/notebook/{token}/cohort-child-b.ipynb"
+    ok = client.get(url, headers={"Origin": "https://dicristea.github.io"})
+    assert ok.status_code == 200 and ok.headers["Access-Control-Allow-Origin"] == "https://dicristea.github.io"
+    assert "Origin" in ok.headers["Vary"] and "{'ctp': 'Child B'}" in ok.data.decode()
+    for origin in ["https://evil.example", "https://dicristea.github.io.evil.example", "null"]:
+        assert "Access-Control-Allow-Origin" not in client.get(url, headers={"Origin": origin}).headers
+    public_demo.setattr(app_module, "NOTEBOOK_CORS_ORIGINS", {"https://lite.example.org"})
+    assert client.get(url, headers={"Origin": "https://lite.example.org"}).headers["Access-Control-Allow-Origin"] == "https://lite.example.org"
+    assert client.get(f"/api/cohort/notebook/{token}/x.html").status_code == 404
+    assert client.get("/api/cohort/notebook/!!!/a.ipynb").status_code == 404
+
+
+def test_notebook_export_keeps_filter_values_as_data():
+    import ast
+    import nbformat
+    evil = "x'}\nimport os; os.system('echo pwned') #\"\"\"<script>alert(1)</script>"
+    client = app.test_client()
+    res = client.get("/api/cohort/notebook.ipynb", query_string={"q": evil, "group": "decomp"})
+    assert res.status_code == 200
+    nb = nbformat.reads(res.data.decode(), as_version=4)
+    setup = nb.cells[1].source
+    tree = ast.parse(setup)  # still valid Python
+    assign = next(n for n in tree.body if isinstance(n, ast.Assign) and n.targets[0].id == "FILTERS")
+    assert ast.literal_eval(assign.value) == {"q": evil.strip()}
+    calls = [n.func for n in ast.walk(tree) if isinstance(n, ast.Call)]
+    assert not any(isinstance(f, ast.Attribute) and f.attr == "system" for f in calls)
+    assert "<script>" not in nb.cells[0].source and "\nimport os" not in nb.cells[0].source
 
 
 def test_patient_profile_and_intraday():
@@ -283,7 +352,7 @@ def test_public_demo_pages_hide_local_only_features(public_demo, tmp_path):
     cohort = client.get("/cohort").data.decode()
     assert 'id="exportNb"' not in cohort and 'id="exportPdf"' in cohort
     nbs = client.get("/notebooks").data.decode()
-    assert "Not available in the public demo" in nbs and "secret_outputs" not in nbs and "localhost" not in nbs
+    assert "secret_outputs" not in nbs and "localhost" not in nbs and "Open in JupyterLab" not in nbs
     assert client.post("/api/cohort/notebook", json={"group": "decomp"}).status_code == 404
     assert not list(tmp_path.glob("cohort_*.ipynb"))
     assert client.get("/ehr/launch?iss=http://169.254.169.254/latest").status_code == 404
@@ -303,6 +372,48 @@ def test_public_demo_simulated_launch_and_shared_log(public_demo):
     assert client.get(f"/ehr/simulate?mrn={data.synthetic_mrn(pid)}").headers["Location"].endswith(f"/patient/{pid}")
     client.get("/ehr/simulate?mrn=typed-by-a-stranger")
     assert [entry["patient"] for entry in app_module.LAUNCH_LOG] == [pid]
+
+
+def test_public_demo_notebooks_tab_links_to_viewer_jupyterlite_and_binder(public_demo):
+    nbs = app.test_client().get("/notebooks").data.decode()
+    assert "Nothing runs on this server" in nbs and "not clinical findings" in nbs
+    assert "https://github.com/dicristea/ehr-wearable-he-dashboard/blob/main/docs/synthetic-data.md" in nbs
+    for name in ["deid_oura_data_exploration", "he_trajectories_phenotypes"]:
+        assert f'href="/notebooks/view/{name}"' in nbs
+        assert (f'href="https://dicristea.github.io/ehr-wearable-he-dashboard/lab/index.html'
+                f'?path=notebooks/{name}.ipynb"') in nbs
+        assert (f'href="https://mybinder.org/v2/gh/dicristea/ehr-wearable-he-dashboard/main'
+                f'?urlpath=lab/tree/notebooks/{name}.ipynb"') in nbs
+    assert nbs.index("View (read-only)") < nbs.index("Run in your browser") < nbs.index("Run on Binder")
+    assert "localhost" not in nbs and "127.0.0.1" not in nbs and "Open in JupyterLab" not in nbs
+
+
+def test_public_demo_notebook_links_follow_env(public_demo):
+    import app as app_module
+    public_demo.setattr(app_module, "NOTEBOOK_REPO", "someone/fork")
+    public_demo.setattr(app_module, "NOTEBOOK_REF", "demo-day")
+    public_demo.setattr(app_module, "JUPYTERLITE_URL", "https://example.org/lite")
+    nbs = app.test_client().get("/notebooks").data.decode()
+    assert "https://mybinder.org/v2/gh/someone/fork/demo-day?urlpath=lab/tree/notebooks/he_trajectories_phenotypes.ipynb" in nbs
+    assert "https://example.org/lite/lab/index.html?path=notebooks/he_trajectories_phenotypes.ipynb" in nbs
+    assert "https://github.com/someone/fork/blob/demo-day/docs/synthetic-data.md" in nbs
+    assert "dicristea" not in nbs
+
+
+def test_demo_notebook_list_matches_the_notebook_sources():
+    import app as app_module
+    sources = sorted(p.stem for p in (Path(app_module.__file__).parent / "notebooks").glob("*.py"))
+    assert sorted(nb["name"] for nb in app_module.DEMO_NOTEBOOKS) == sources
+
+
+def test_local_notebooks_tab_is_unchanged(monkeypatch, tmp_path):
+    import app as app_module
+    monkeypatch.setattr(app_module, "NOTEBOOK_DIRS", [tmp_path])
+    monkeypatch.setattr(app_module, "JUPYTER_ROOT", tmp_path.parent)
+    (tmp_path / "mine.ipynb").write_text("{}")
+    nbs = app.test_client().get("/notebooks").data.decode()
+    assert f"{app_module.JUPYTER_BASE_URL}/lab/tree/{tmp_path.name}/mine.ipynb" in nbs and "Open in JupyterLab" in nbs
+    assert "mybinder.org" not in nbs and "Run in your browser" not in nbs and "/notebooks/view/" not in nbs
 
 
 def test_local_default_is_not_demo():

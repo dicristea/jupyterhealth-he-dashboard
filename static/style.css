@@ -81,6 +81,12 @@ canvas.actogram { width: 100%; image-rendering: pixelated; border-radius: 6px; b
 .nb-icon { width: 34px; height: 34px; border-radius: 8px; background: #fff7ed; color: #ea580c; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
 .nb-name { font-weight: 600; font-size: 14px; text-transform: capitalize; }
 .nb-meta { font-size: 12px; color: var(--muted); }
+.nb-explainer { flex-direction: column; gap: 6px; }
+.nb-head { display: flex; gap: 14px; align-items: flex-start; }
+.nb-head .nb-icon { flex-shrink: 0; }
+.nb-actions { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-left: 48px; }
+.nb-actions small { display: block; font-size: 11px; color: var(--muted); margin-top: 5px; max-width: 220px; }
+@media (max-width: 640px) { .nb-actions { margin-left: 0; } }
 .btn { display: inline-block; padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; border: 1px solid var(--line); background: #fff; color: var(--ink); }
 .btn:hover { border-color: var(--blue); color: var(--blue); }
 .btn.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
@@ -100,6 +106,7 @@ svg text { font-family: inherit; }
 .menu-list button { display: block; width: 100%; text-align: left; font: inherit; font-size: 13px; padding: 8px 10px; border: none; background: none; border-radius: 6px; cursor: pointer; color: var(--ink); }
 .menu-list button:hover { background: var(--soft); }
 .menu-list small { display: block; color: var(--muted); font-size: 11px; }
+.menu-note { margin: 4px 10px 6px; max-width: 260px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; }
 .toast { position: fixed; bottom: 24px; right: 24px; background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 13px; z-index: 50; }
 .toast a { color: #93c5fd; }
 
