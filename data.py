@@ -2,14 +2,22 @@
 
 The real de-identified file never lives in this repo. By default it is the single .rds file in
 ../de-identified data/ (override with HE_DATA_FILE); when it is missing the app falls back to a
-small synthetic cohort so the UI still runs anywhere.
+small synthetic cohort so the UI still runs anywhere. The hosted study site (HE_HOSTED_STUDY=1)
+instead downloads the converted cache from HE_DATA_URL at startup.
 """
 from __future__ import annotations
 
 import copy
+import json
+import logging
 import os
 import re
+import shutil
 import subprocess
+import sys
+import tempfile
+import urllib.parse
+import urllib.request
 from functools import lru_cache
 from pathlib import Path
 
@@ -43,6 +51,19 @@ DATA_FILE = _data_file()
 DATA_SOURCE = os.environ.get("HE_DATA_SOURCE", "auto").lower()
 # Hosted public demo: always the in-memory synthetic cohort; study data and HE_MRN_MAP are never read.
 PUBLIC_DEMO = os.environ.get("HE_PUBLIC_DEMO", "").strip().lower() in {"1", "true", "yes"}
+# Hosted de-identified study site (docs/hosting.md): study data downloaded from HE_DATA_URL, password required.
+HOSTED_STUDY = os.environ.get("HE_HOSTED_STUDY", "").strip().lower() in {"1", "true", "yes"}
+if PUBLIC_DEMO and HOSTED_STUDY:
+    raise RuntimeError("HE_PUBLIC_DEMO and HE_HOSTED_STUDY can't both be on: one serves synthetic data only, "
+                       "the other serves study data")
+
+
+def hosted() -> bool:
+    """On a host rather than this computer: local-only features (JupyterLab, writing files, real EHR launches,
+    the MRN map) are off. A function, not a constant, so tests can switch either mode on."""
+    return PUBLIC_DEMO or HOSTED_STUDY
+
+
 SYNTHETIC_FILE = Path(os.environ.get(
     "HE_SYNTHETIC_FILE", HERE / "synthetic_data" / "synthetic_he.csv.gz")).expanduser()
 # Cache sits next to the data (outside the repo) so a converted copy can't be committed by accident.
@@ -80,13 +101,32 @@ GROUPS = {
 # Tiles on the patient profile, in order. Trim or reorder here once clinicians have prioritised measures.
 PATIENT_TILES = ["night_rest_h", "sri", "rest_mid_6pm", "average_hrv", "average_heart_rate", "steps", "spo2"]
 
-BASELINE_FIELDS = [
-    ("sex", "Sex"), ("age_yrs", "Age"), ("ctp_class", "Child-Pugh"), ("meld", "MELD"),
-    ("cirrhosis_etiology", "Etiology"), ("decomp", "Decompensated"), ("anyhe", "Any HE"),
-    ("anyOHE", "Overt HE"), ("che_phes", "Covert HE (PHES)"), ("phes_score", "PHES score"),
-    ("he_meds", "HE meds"), ("ascites", "Ascites"), ("variceal_bleeding_history", "Variceal bleed"),
-    ("psqiglobal", "PSQI"), ("cldq_total", "CLDQ total"), ("liver_frailty_index", "Frailty index"),
-]
+# Clinical snapshot panel on the patient profile: group → (column, label). Baseline (enrolment) values only.
+# A column missing from the data is left out, and a group with no columns left is hidden. meld_cat and lfi_cat
+# are left out: in the study file they are numeric codes with no labels to show.
+CLINICAL_SNAPSHOT = {
+    "Liver severity": [("meld", "MELD"), ("ctp_class", "Child-Pugh class")],
+    "Decompensation": [("decomp", "Decompensated"), ("ascites", "Ascites"),
+                       ("medication_for_ascites", "Ascites medication"),
+                       ("variceal_bleeding_history", "Variceal bleeding history")],
+    "Hepatic encephalopathy": [("anyhe", "Any HE"), ("anyOHE", "Overt HE (ever)"), ("che_phes", "Covert HE (PHES)"),
+                               ("phes_score", "PHES score"), ("he_meds", "HE meds"),
+                               ("ever_he_meds", "HE meds (ever)")],
+    "Frailty": [("liver_frailty_index", "Liver Frailty Index"), ("robust", "Robust"), ("frail", "Frailty category")],
+    "Etiology": [("cirrhosis_etiology", "Cirrhosis etiology")],
+    "Patient-reported": [("psqiglobal", "Sleep quality (PSQI)"), ("cldq_total", "CLDQ total"),
+                         ("cldq_fatigue", "CLDQ fatigue"), ("cldq_activity", "CLDQ activity")],
+}
+
+
+def clinical_snapshot(first: pd.Series, columns) -> list[dict]:
+    """Snapshot groups for one patient's first row; `columns` are the columns the loaded data has."""
+    groups = []
+    for name, fields in CLINICAL_SNAPSHOT.items():
+        shown = [{"label": label, "value": _baseline_value(first.get(col))} for col, label in fields if col in columns]
+        if shown:
+            groups.append({"group": name, "fields": shown})
+    return groups
 
 R_TO_CSV = r"""
 args <- commandArgs(trailingOnly = TRUE)
@@ -104,6 +144,87 @@ write.csv(x, args[2], row.names = FALSE, na = "")
 """
 
 
+def _safe_url(url: str) -> str:
+    """URL without credentials, query string or fragment, for logs and error messages."""
+    u = urllib.parse.urlsplit(url)
+    return f"{u.scheme}://{u.hostname or ''}{u.path}"
+
+
+def fetch_hosted_data(url: str, token: str = "", dest_dir: Path | None = None) -> Path:
+    """Download the study cache (gzipped .v2.csv) once into a temp folder and return its path.
+
+    Made for a GitHub release asset API URL. The token goes in an *unredirected* header: it reaches
+    api.github.com only, not the storage host GitHub redirects to (which rejects a second credential).
+    """
+    req = urllib.request.Request(url, headers={"Accept": "application/octet-stream",
+                                               "User-Agent": "he-dashboard-hosted"})
+    if token:
+        req.add_unredirected_header("Authorization", f"Bearer {token}")
+    dest = Path(dest_dir or tempfile.mkdtemp(prefix="he-data-")) / "study.v2.csv.gz"
+    log = logging.getLogger("he.data")
+    try:
+        with urllib.request.urlopen(req, timeout=120) as res, dest.open("wb") as out:
+            shutil.copyfileobj(res, out, length=1 << 20)
+    except Exception as exc:  # the message names neither the token nor a signed redirect URL
+        reason = getattr(exc, "code", None) or type(exc).__name__
+        log.error("Study data download failed from %s (%s)", _safe_url(url), reason)
+        raise RuntimeError(f"Could not download study data from {_safe_url(url)} ({reason})") from None
+    log.warning("Study data downloaded from %s (%d bytes)", _safe_url(url), dest.stat().st_size)
+    return dest
+
+
+HOSTED_DATA_FILE: Path | None = None  # the downloaded study cache, set by load() in HE_HOSTED_STUDY mode
+
+# The hosted study site's own JupyterLite (docs/jupyterlite.md → hosted study site) ships this marker next to
+# data.py and no data at all; there, load() and lite_study_table() fetch the study cache from the site.
+LITE_MARKER = HERE / "hosted_study.json"
+
+
+def in_hosted_lite() -> bool:
+    """Running in the browser (Pyodide) inside the hosted study site's JupyterLite."""
+    return sys.platform == "emscripten" and LITE_MARKER.exists()
+
+
+def _browser_get(url: str) -> bytes:
+    """GET a same-origin URL from the Pyodide kernel, with the page's login cookie. The kernel runs in a web
+    worker, where synchronous requests are allowed; the text fallback covers browsers that refuse binary ones."""
+    from js import XMLHttpRequest  # only exists under Pyodide
+    req = XMLHttpRequest.new()
+    req.open("GET", url, False)
+    try:
+        req.responseType = "arraybuffer"
+        binary = True
+    except Exception:
+        req.overrideMimeType("text/plain; charset=x-user-defined")
+        binary = False
+    req.send(None)
+    if req.status != 200:
+        raise RuntimeError(f"The study site answered {req.status} for {url}: log in to the dashboard in this "
+                           "browser, then run the cell again.")
+    if binary:
+        return bytes(req.response.to_py())
+    return bytes(ord(ch) & 0xFF for ch in req.responseText)
+
+
+@lru_cache(maxsize=1)
+def lite_study_table() -> tuple[pd.DataFrame, str]:
+    """Raw study participant-days for notebooks in the hosted site's JupyterLite, and where they came from."""
+    if not in_hosted_lite():
+        raise RuntimeError("lite_study_table() only works in the hosted study site's JupyterLite")
+    url = json.loads(LITE_MARKER.read_text()).get("data_url", "/api/study-data.csv.gz")
+    path = Path(tempfile.mkdtemp(prefix="he-data-")) / "study.v2.csv.gz"  # the kernel's memory filesystem
+    path.write_bytes(_browser_get(url))
+    return _read_cache_csv(path), "the study site (de-identified study data)"
+
+
+def _read_cache_csv(path: Path) -> pd.DataFrame:
+    """The R-converted study cache (.v2.csv), plain or gzipped (told apart by magic bytes, not the name)."""
+    with path.open("rb") as fh:
+        gz = fh.read(2) == b"\x1f\x8b"
+    return pd.read_csv(path, low_memory=False, compression="gzip" if gz else None,
+                       dtype={"class_5_min": str, "name": str, "met_5min": str})
+
+
 def _read_rds(path: Path) -> pd.DataFrame:
     # pyreadr can't parse haven-labelled or list columns, so R converts the file once.
     cache = CACHE_DIR / (path.stem + ".v2.csv")  # v2 adds met_5min
@@ -112,7 +233,7 @@ def _read_rds(path: Path) -> pd.DataFrame:
         script = CACHE_DIR / "rds_to_csv.R"
         script.write_text(R_TO_CSV)
         subprocess.run(["Rscript", str(script), str(path), str(cache)], check=True)
-    return pd.read_csv(cache, low_memory=False, dtype={"class_5_min": str, "name": str, "met_5min": str})
+    return _read_cache_csv(cache)
 
 
 # Every assumption behind the synthetic cohort, in one place. These are hand-picked, round,
@@ -286,13 +407,25 @@ def _sri(today, tomorrow):
 @lru_cache(maxsize=1)
 def load() -> tuple[pd.DataFrame, str]:
     """Return (daily table with derived measures, source label). Cached; restart to reload."""
+    global HOSTED_DATA_FILE
     if DATA_SOURCE not in {"auto", "study", "synthetic"}:
         raise ValueError("HE_DATA_SOURCE must be auto, study, or synthetic")
-    if PUBLIC_DEMO:
+    if in_hosted_lite():
+        df, source = lite_study_table()[0].copy(), "study"
+    elif PUBLIC_DEMO:
         if DATA_SOURCE == "study" or os.environ.get("HE_MRN_MAP"):
             raise RuntimeError("HE_PUBLIC_DEMO=1 serves synthetic data only: unset HE_DATA_SOURCE=study and HE_MRN_MAP")
         # Not even HE_SYNTHETIC_FILE: on a host it could point at anything.
         df, source = synthetic_cohort(), "synthetic"
+    elif HOSTED_STUDY:
+        url = os.environ.get("HE_DATA_URL", "")
+        if not url:
+            raise RuntimeError("HE_HOSTED_STUDY=1 needs HE_DATA_URL, the study cache to download (docs/hosting.md)")
+        if DATA_SOURCE == "synthetic" or os.environ.get("HE_MRN_MAP"):
+            raise RuntimeError("HE_HOSTED_STUDY=1 serves the downloaded study data only: "
+                               "unset HE_DATA_SOURCE=synthetic and HE_MRN_MAP")
+        HOSTED_DATA_FILE = fetch_hosted_data(url, os.environ.get("HE_DATA_TOKEN", ""))
+        df, source = _read_cache_csv(HOSTED_DATA_FILE), "study"
     elif DATA_SOURCE == "synthetic":
         if not SYNTHETIC_FILE.exists():
             raise FileNotFoundError(f"Synthetic data not found: {SYNTHETIC_FILE}. Run the generator first.")
@@ -499,7 +632,7 @@ def patient_detail(pid: str) -> dict | None:
         "sex": _baseline_value(first.get("sex")),
         "age": _baseline_value(first.get("age_yrs")),
         "ctp": _baseline_value(first.get("ctp_class")),
-        "baseline": [{"label": label, "value": _baseline_value(first.get(col))} for col, label in BASELINE_FIELDS if col in g],
+        "clinical": clinical_snapshot(first, g.columns),
         "days": days,
         "valid": [bool(x) for x in is_valid],
         "valid_pct": int(round(100 * is_valid.mean())),
@@ -547,7 +680,7 @@ def resolve_mrn(mrn: str) -> str | None:
     ids = set(df["name"].unique())
     if source == "synthetic":
         return next((pid for pid in ids if synthetic_mrn(pid) == mrn), None)
-    if PUBLIC_DEMO:
+    if hosted():
         return None
     map_file = os.environ.get("HE_MRN_MAP")  # CSV with columns mrn,study_id; must live outside the repo
     if map_file and Path(map_file).exists():

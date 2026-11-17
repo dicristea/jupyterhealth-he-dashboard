@@ -23,6 +23,9 @@
     </div>
 </div>
 
+<div class="pt-layout">
+{% include "_clinical_snapshot.html" %}
+<div class="pt-main">
 <div class="kpi-row">
     {% for s in p.summary %}
     <div class="kpi" title="{{ s.help }}"><div class="kpi-value">{{ s.value if s.value is not none else '—' }}</div>
@@ -50,6 +53,7 @@
         <div class="mcard-foot">{{ t.n_obs }} valid days · {{ t.trend }}</div>
     </div>
     {% endfor %}
+    {% include "_speech_placeholder.html" %}
 </div>
 
 <div class="card">
@@ -110,13 +114,8 @@
     <canvas class="actogram" id="actogram"></canvas>
     <div class="legend" id="actLegend"></div>
 </div>
-
-<div class="card">
-    <h2>Baseline (at enrolment)</h2>
-    <div class="header-grid">
-        {% for b in p.baseline %}<div><span>{{ b.label }}</span>{{ b.value if b.value is not none else '—' }}</div>{% endfor %}
-    </div>
-</div>
+</div><!-- /.pt-main -->
+</div><!-- /.pt-layout -->
 
 <script>
 (function () {

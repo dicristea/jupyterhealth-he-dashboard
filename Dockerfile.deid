@@ -1,0 +1,43 @@
+# Hosted de-identified study site (docs/hosting.md → Hosted de-identified site). Build from the PRIVATE repo only.
+# The image holds code only (.dockerignore allows nothing else into the build context). The study data is
+# downloaded at start-up from HE_DATA_URL (a private GitHub release asset) and lives only in the container's /tmp.
+
+# ── Stage 1: this site's own JupyterLite, built WITHOUT any data (not even synthetic) ───────────────────────────
+# LITE_VARIANT=hosted-study adds a hosted_study.json marker instead; in the browser, data.py then fetches the study
+# data from /api/study-data.csv.gz with the visitor's login cookie. The script refuses to finish if a data file
+# ended up in the build. Only the static site moves on to the runtime image.
+FROM python:3.13-slim AS lite
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /build
+COPY lite/ lite/
+RUN pip install --no-cache-dir -r lite/requirements-build.txt
+COPY data.py ./
+COPY scripts/build_jupyterlite.sh scripts/
+COPY notebooks/ notebooks/
+RUN LITE_VARIANT=hosted-study OUT=/build/lite_site bash scripts/build_jupyterlite.sh
+
+# ── Stage 2: the web app ───────────────────────────────────────────────────────────────────────────────────────
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=8000
+WORKDIR /app
+
+# Only what the web app imports. No R: the release asset is already the converted .v2.csv.gz cache.
+RUN pip install --no-cache-dir \
+    flask==3.1.3 pandas==3.0.6 numpy==2.5.4 scipy==1.18.1 nbformat==5.11.1 gunicorn==27.0.0
+
+COPY app.py data.py ./
+COPY templates/ templates/
+COPY static/ static/
+# Shown as read-only code (CODE_PAGES in app.py), never run.
+COPY notebooks/speech_features_starter.py notebooks/
+COPY --from=lite /build/lite_site/ lite_site/
+
+RUN useradd --create-home study
+USER study
+
+# HE_HOSTED_STUDY is set here, not with ENV, so a host setting can't switch it off (or switch demo mode on).
+# The app refuses to start without DEMO_PASSWORD and HE_DATA_URL. Without --preload each worker would download
+# its own copy; with one worker and --preload the data is fetched once, before the port opens.
+# --timeout 180: the download plus deriving the measures for ~16k participant-days on Render's free 0.1 CPU.
+CMD exec env HE_HOSTED_STUDY=1 HE_PUBLIC_DEMO= gunicorn --bind "0.0.0.0:${PORT}" --workers 1 --threads 4 --timeout 180 --preload --access-logfile - app:app

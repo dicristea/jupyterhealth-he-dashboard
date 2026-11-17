@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Log in · HE Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main class="page login-page">
+    <form class="card login-card" method="post" action="{{ url_for('login') }}">
+        <div class="brand login-brand">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            HE Dashboard <small>JupyterHealth</small>
+        </div>
+        <h1>Log in</h1>
+        <p class="hint">{% if hosted_study %}De-identified study data. Use the username and password the study team sent you, and don't share them.{% else %}This demo is password protected.{% endif %}</p>
+        {% if error %}<p class="login-error" role="alert">{{ error }}</p>{% endif %}
+        <label>Username<input name="username" autocomplete="username" required autofocus></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <input type="hidden" name="next" value="{{ next }}">
+        <button class="btn primary" type="submit">Log in</button>
+    </form>
+</main>
+</body>
+</html>

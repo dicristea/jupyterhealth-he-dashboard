@@ -231,6 +231,46 @@ DAILY_COLUMNS = ["name", "days_since_start", "day_type", "valid80", "non_wear_pc
                  "average_hrv", "average_heart_rate", "steps", "spo2"]
 
 
+# Snapshot columns the generator makes; the rest (e.g. medication_for_ascites, cldq_fatigue) exist only in the study file.
+SYNTHETIC_SNAPSHOT_COLUMNS = {"meld", "ctp_class", "decomp", "ascites", "variceal_bleeding_history", "anyhe", "anyOHE",
+                              "che_phes", "phes_score", "he_meds", "liver_frailty_index", "cirrhosis_etiology",
+                              "psqiglobal", "cldq_total"}
+
+
+def test_clinical_snapshot_on_synthetic_patient():
+    pid = data.patient_list()[0]["id"]
+    groups = data.patient_detail(pid)["clinical"]
+    assert [g["group"] for g in groups] == list(data.CLINICAL_SNAPSHOT)  # each group has a synthetic column, in order
+    shown = {f["label"] for g in groups for f in g["fields"]}
+    labels = {c: label for fields in data.CLINICAL_SNAPSHOT.values() for c, label in fields}
+    assert shown == {labels[c] for c in SYNTHETIC_SNAPSHOT_COLUMNS}  # columns the data lacks aren't shown
+    frailty = next(g for g in groups if g["group"] == "Frailty")["fields"]
+    assert frailty == [{"label": "Liver Frailty Index", "value": None}]  # present column, missing value → "—"
+    severity = {f["label"]: f["value"] for f in groups[0]["fields"]}
+    assert isinstance(severity["MELD"], int) and severity["Child-Pugh class"] in {"Child A", "Child B"}
+
+
+def test_clinical_snapshot_hides_groups_without_columns():
+    row = pd.Series({"meld": 14.0, "decomp": 1.0, "medication_for_ascites": "Yes", "robust": 0.0})
+    groups = data.clinical_snapshot(row, ["meld", "decomp", "medication_for_ascites", "robust"])
+    assert [g["group"] for g in groups] == ["Liver severity", "Decompensation", "Frailty"]
+    assert groups[1]["fields"] == [{"label": "Decompensated", "value": "Yes"},
+                                   {"label": "Ascites medication", "value": "Yes"}]
+    assert groups[2]["fields"] == [{"label": "Robust", "value": "No"}]
+    assert data.clinical_snapshot(row, []) == []
+
+
+def test_patient_page_shows_clinical_snapshot():
+    pid = data.patient_list()[0]["id"]
+    page = app.test_client().get(f"/patient/{pid}").data.decode()
+    assert 'id="clinicalSnapshot"' in page and "At enrolment" in page
+    for group in data.CLINICAL_SNAPSHOT:
+        assert f'<div class="cp-group">{group} ' in page
+    assert "Ascites medication" not in page  # not in the synthetic data
+    assert "imaging and hospitalizations will appear here" in page
+    assert "Baseline (at enrolment)" not in page  # the snapshot replaces the old baseline card
+
+
 def test_synthetic_same_seed_same_output():
     a = data.synthetic_cohort(n=4, seed=11, min_days=3, max_days=6)
     pd.testing.assert_frame_equal(a, data.synthetic_cohort(n=4, seed=11, min_days=3, max_days=6))
@@ -239,7 +279,7 @@ def test_synthetic_same_seed_same_output():
 
 def test_synthetic_schema_matches_what_the_dashboard_reads():
     df = data.synthetic_cohort(n=6, seed=3, min_days=4, max_days=8)
-    baseline = [c for c, _ in data.BASELINE_FIELDS]
+    baseline = [c for fields in data.CLINICAL_SNAPSHOT.values() for c, _ in fields if c in SYNTHETIC_SNAPSHOT_COLUMNS]
     needed = set(DAILY_COLUMNS) | set(baseline) | set(data.GROUPS) | {"ctp_class", "anyhe", "age_yrs"}
     assert needed <= set(df.columns), needed - set(df.columns)
     numeric = ["days_since_start", "valid80", "non_wear_pct", "average_hrv", "average_heart_rate", "steps", "spo2",
@@ -377,12 +417,12 @@ def test_public_demo_simulated_launch_and_shared_log(public_demo):
 def test_public_demo_notebooks_tab_links_to_viewer_jupyterlite_and_binder(public_demo):
     nbs = app.test_client().get("/notebooks").data.decode()
     assert "Nothing runs on this server" in nbs and "not clinical findings" in nbs
-    assert "https://github.com/dicristea/ehr-wearable-he-dashboard/blob/main/docs/synthetic-data.md" in nbs
+    assert "https://github.com/dicristea/jupyterhealth-he-dashboard/blob/main/docs/synthetic-data.md" in nbs
     for name in ["deid_oura_data_exploration", "he_trajectories_phenotypes"]:
         assert f'href="/notebooks/view/{name}"' in nbs
-        assert (f'href="https://dicristea.github.io/ehr-wearable-he-dashboard/lab/index.html'
+        assert (f'href="https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html'
                 f'?path=notebooks/{name}.ipynb"') in nbs
-        assert (f'href="https://mybinder.org/v2/gh/dicristea/ehr-wearable-he-dashboard/main'
+        assert (f'href="https://mybinder.org/v2/gh/dicristea/jupyterhealth-he-dashboard/main'
                 f'?urlpath=lab/tree/notebooks/{name}.ipynb"') in nbs
     assert nbs.index("View (read-only)") < nbs.index("Run in your browser") < nbs.index("Run on Binder")
     assert "localhost" not in nbs and "127.0.0.1" not in nbs and "Open in JupyterLab" not in nbs
@@ -402,7 +442,9 @@ def test_public_demo_notebook_links_follow_env(public_demo):
 
 def test_demo_notebook_list_matches_the_notebook_sources():
     import app as app_module
-    sources = sorted(p.stem for p in (Path(app_module.__file__).parent / "notebooks").glob("*.py"))
+    # The speech notebook is local-only (needs recordings and Praat; scripts/render_notebooks.NOT_RENDERED).
+    sources = sorted(p.stem for p in (Path(app_module.__file__).parent / "notebooks").glob("*.py")
+                     if p.stem != "speech_features_starter")
     assert sorted(nb["name"] for nb in app_module.DEMO_NOTEBOOKS) == sources
 
 
@@ -460,21 +502,40 @@ def test_demo_password_is_off_by_default():
 
 
 def test_demo_password_protects_every_page_but_healthz(monkeypatch):
-    import base64
+    import app as app_module
+    monkeypatch.setattr(app_module, "DEMO_PASSWORD", "s3cret")
+    monkeypatch.setattr(app_module, "LOGIN_FAIL_DELAY_S", 0)
+    client = app.test_client()
+
+    def log_in(user: str, pw: str, nxt: str = "/"):
+        return client.post("/login", data={"username": user, "password": pw, "next": nxt})
+
+    for url in ["/", "/cohort", "/patient/DEMO-01"]:
+        res = client.get(url)
+        assert res.status_code == 302 and res.headers["Location"].startswith("/login?next="), url
+    assert client.get("/api/cohort").status_code == 401  # APIs answer, they don't redirect
+    assert client.post("/api/cohort/notebook", json={}).status_code == 401
+    assert client.get("/login").status_code == 200 and client.get("/healthz").status_code == 200
+    assert client.get("/static/style.css").status_code == 200  # the login page needs it; code only
+    assert log_in("demo", "wrong").status_code == 401
+    assert log_in("someone", "s3cret").status_code == 401
+    assert client.get("/", headers={"Authorization": "Bearer s3cret"}).status_code == 302
+    res = log_in("demo", "s3cret", "/cohort?group=sex")
+    assert res.status_code == 302 and res.headers["Location"] == "/cohort?group=sex"
+    cookie = res.headers["Set-Cookie"]
+    assert "HttpOnly" in cookie and "SameSite=Lax" in cookie
+    assert client.get("/").status_code == 200
+    monkeypatch.setattr(app_module, "DEMO_USER", "henry")  # a new user or password logs everyone out
+    assert client.get("/").status_code == 302
+    log_in("henry", "s3cret")
+    assert client.get("/").status_code == 200
+    assert client.get("/logout").status_code == 302 and client.get("/").status_code == 302
+
+
+def test_login_redirect_stays_on_this_site(monkeypatch):
     import app as app_module
     monkeypatch.setattr(app_module, "DEMO_PASSWORD", "s3cret")
     client = app.test_client()
-
-    def basic(user: str, pw: str) -> dict:
-        return {"Authorization": "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()}
-
-    for url in ["/", "/cohort", "/api/cohort", "/static/style.css"]:
-        res = client.get(url)
-        assert res.status_code == 401 and "Basic" in res.headers["WWW-Authenticate"], url
-    assert client.get("/", headers=basic("demo", "wrong")).status_code == 401
-    assert client.get("/", headers=basic("someone", "s3cret")).status_code == 401
-    assert client.get("/", headers={"Authorization": "Bearer s3cret"}).status_code == 401
-    assert client.get("/", headers=basic("demo", "s3cret")).status_code == 200
-    assert client.get("/healthz").status_code == 200
-    monkeypatch.setattr(app_module, "DEMO_USER", "henry")
-    assert client.get("/", headers=basic("henry", "s3cret")).status_code == 200
+    for evil in ["https://evil.example/", "//evil.example/x", "/\\evil.example", "javascript:alert(1)", ""]:
+        res = client.post("/login", data={"username": "demo", "password": "s3cret", "next": evil})
+        assert res.headers["Location"] == "/", evil

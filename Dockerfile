@@ -30,6 +30,8 @@ COPY app.py data.py ./
 COPY templates/ templates/
 COPY static/ static/
 COPY --from=notebooks /build/rendered_notebooks/ rendered_notebooks/
+# Shown as read-only code (CODE_PAGES in app.py), never run.
+COPY notebooks/speech_features_starter.py notebooks/
 
 RUN useradd --create-home demo
 USER demo

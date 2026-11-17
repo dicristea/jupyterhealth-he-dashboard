@@ -6,9 +6,10 @@
 
 {% if error %}<div class="notice">{{ error }}</div>{% endif %}
 {% if public_demo %}<div class="notice">Public demo: real EHR launches are switched off. Use <em>Simulate launch</em> with a synthetic MRN to see what a launch from the patient's chart does.</div>{% endif %}
+{% if hosted_study %}<div class="notice">Real EHR launches are switched off on this hosted site, and the de-identified study data has no MRNs to match a launch to.</div>{% endif %}
 
 <div class="two-col">
-    {% if not public_demo %}
+    {% if not hosted %}
     <div class="card">
         <h2>Connection settings</h2>
         <table class="list" style="margin-top:8px">
@@ -37,7 +38,7 @@
     </div>
 </div>
 
-{% if not public_demo %}
+{% if not hosted %}
 <div class="card">
     <h2>Connect Medplum</h2>
     <ol class="hint" style="padding-left:18px;margin:6px 0 0;line-height:1.9">

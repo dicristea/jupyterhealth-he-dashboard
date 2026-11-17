@@ -36,7 +36,8 @@ def rendered(monkeypatch, tmp_path):
 
 def test_render_script_and_app_agree_on_names():
     assert render_notebooks.NOTEBOOKS == list(app_module.RENDERED_NOTEBOOKS)
-    assert sorted(render_notebooks.NOTEBOOKS) == sorted(p.stem for p in (ROOT / "notebooks").glob("*.py"))
+    every = {p.stem for p in (ROOT / "notebooks").glob("*.py")}
+    assert sorted(render_notebooks.NOTEBOOKS) == sorted(every - render_notebooks.NOT_RENDERED)
 
 
 def test_demo_serves_the_rendered_page_in_a_sandboxed_frame(rendered):

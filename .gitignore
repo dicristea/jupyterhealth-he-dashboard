@@ -77,3 +77,18 @@ _site/
 
 # Read-only notebook pages, built in the Docker builder stage (scripts/render_notebooks.py). Never commit.
 rendered_notebooks/
+
+# Voice recordings are identifiable; speech features are derived from them. Never commit either.
+recordings/
+speech recordings/
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.ogg
+speech_features*.csv
+speech_features*.json
+
+# Hosted study site JupyterLite (Dockerfile.deid builds it into the image; a local build for testing lands here)
+lite_site/
+.venv-lite/

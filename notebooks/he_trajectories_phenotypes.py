@@ -49,19 +49,25 @@
 
 # %%
 import os
+import sys
 from pathlib import Path
 
 DATA_SOURCE = os.environ.get("HE_DATA_SOURCE", "auto").strip().lower()
 if DATA_SOURCE not in {"auto", "study", "synthetic"}:
     raise ValueError("HE_DATA_SOURCE must be auto, study or synthetic")
-if DATA_SOURCE == "auto":
+# In the password-protected study site's JupyterLite (in the browser), the data comes from the site itself.
+HOSTED_LITE = sys.platform == "emscripten" and any((p / "hosted_study.json").exists() for p in (Path.cwd(), *Path.cwd().parents))
+if HOSTED_LITE:
+    DATA_SOURCE = "study"
+elif DATA_SOURCE == "auto":
     found_rds = sorted(Path("../../de-identified data").glob("*.rds"))
     DATA_SOURCE = "study" if os.environ.get("JH_DATA_FILE") or len(found_rds) == 1 else "synthetic"
 SYNTHETIC = DATA_SOURCE == "synthetic"
-print("Data source:", DATA_SOURCE)
+print("Data source:", DATA_SOURCE + (" (from the study site)" if HOSTED_LITE else ""))
 if SYNTHETIC:
     print("⚠️  SYNTHETIC DATA. Every result below is an artefact of the generator settings "
           "(docs/synthetic-data.md), not a clinical finding.")
+if SYNTHETIC or HOSTED_LITE:
     # The repo folder (it holds the dashboard's data.py), whether Jupyter started in notebooks/ or the repo
     REPO = next((p for p in (Path.cwd(), *Path.cwd().parents) if (p / "data.py").exists()), None)
     if REPO is None:
@@ -147,10 +153,10 @@ def default_data_file(folder: Path = Path("../../de-identified data")) -> Path:
     return found[0]
 
 
-if SYNTHETIC:
+if SYNTHETIC or HOSTED_LITE:
     sys.path.insert(0, str(REPO))  # the dashboard's data.py
     import data
-    OUTPUT_DIR = REPO / "notebook_outputs"   # git-ignored, inside the repo
+    OUTPUT_DIR = REPO / "notebook_outputs"   # git-ignored, inside the repo (in JupyterLite: this browser only)
     OUTPUT_DIR.mkdir(exist_ok=True)
 else:
     DATA_FILE = Path(os.environ.get("JH_DATA_FILE") or default_data_file()).expanduser().resolve()
@@ -180,6 +186,9 @@ def load_rds(path: Path) -> pd.DataFrame:
 if SYNTHETIC:
     raw, origin = data.synthetic_table()
     print("Synthetic cohort:", origin)
+elif HOSTED_LITE:
+    raw, origin = data.lite_study_table()
+    print("Study data from", origin)
 else:
     raw = load_rds(DATA_FILE)
 df = raw.sort_values(["name", "days_since_start"]).reset_index(drop=True)

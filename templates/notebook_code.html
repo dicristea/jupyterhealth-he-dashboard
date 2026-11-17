@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Notebooks · HE Dashboard{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div class="grow">
+        <h1>{{ title }} <span class="badge-wip">In progress · awaiting recordings</span></h1>
+        <p class="sub">Read-only code, <code>notebooks/{{ file }}</code>. Nothing runs here: this page only shows the code.</p>
+    </div>
+    <a class="btn" href="/notebooks">← Notebooks</a>
+</div>
+{% for cell in cells %}
+{% if cell.kind == 'markdown' %}<div class="code-note">{{ cell.text }}</div>
+{% else %}<pre class="code-cell"><code>{{ cell.text }}</code></pre>{% endif %}
+{% endfor %}
+{% endblock %}

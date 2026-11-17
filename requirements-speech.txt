@@ -1,0 +1,5 @@
+# Speech feature notebook only (notebooks/speech_features_starter.py). Not used by the web app, the Docker
+# image or JupyterLite (Praat can't run in the browser). mp3/m4a recordings also need ffmpeg on the system.
+praat-parselmouth==0.4.7
+librosa==1.0.1
+soundfile==0.14.0

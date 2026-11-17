@@ -1,6 +1,8 @@
-# Send nothing to the Docker build except code (see Dockerfile and docs/hosting.md).
-# The runtime stage copies only app.py, data.py, templates/, static/ and the rendered notebook pages;
-# the rest is for the builder stage that renders the notebooks on synthetic data.
+# Send nothing to the Docker build except code (see Dockerfile, Dockerfile.deid and docs/hosting.md).
+# Allowlist only: no .rds, .csv, .csv.gz, caches or notebook outputs can enter the build context, so neither
+# image can contain study data. Both runtime stages copy only app.py, data.py, templates/ and static/, plus
+# the speech notebook source (shown as read-only code) and what their builder stage made: the demo's rendered notebook pages (on synthetic data), or the hosted site's
+# JupyterLite (lite/ settings + build_jupyterlite.sh + notebooks/*.py, built with no data at all).
 *
 !app.py
 !data.py
@@ -10,3 +12,6 @@
 !scripts/generate_synthetic_data.py
 !scripts/render_notebooks.py
 !notebooks/*.py
+!scripts/build_jupyterlite.sh
+!lite/*.json
+!lite/requirements-build.txt

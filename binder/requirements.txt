@@ -7,3 +7,7 @@ scikit-learn==1.9.1
 matplotlib==3.11.2
 jupytext==1.19.6
 ipykernel==7.4.0
+# Speech feature notebook (same pins as requirements-speech.txt); it runs on Binder with no recordings.
+praat-parselmouth==0.4.7
+librosa==1.0.1
+soundfile==0.14.0

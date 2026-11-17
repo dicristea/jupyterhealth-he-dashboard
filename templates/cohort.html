@@ -10,8 +10,9 @@
         <button class="btn" id="exportBtn" aria-haspopup="true" aria-expanded="false">Export ▾</button>
         <div class="menu-list" id="exportMenu" hidden>
             <button id="exportPdf">PDF report<small>All measures for this comparison; opens print → Save as PDF</small></button>
-            {% if not public_demo %}<button id="exportNb">New notebook<small>Pre-filled with this cohort, opens in JupyterLab</small></button>{% endif %}
+            {% if not hosted %}<button id="exportNb">New notebook<small>Pre-filled with this cohort, opens in JupyterLab</small></button>{% endif %}
             <button id="exportNbDownload">Download notebook (.ipynb)<small>Stores this cohort's filters, not patient IDs{% if public_demo %}; runs on synthetic data{% endif %}</small></button>
+            {% if hosted_study %}<button id="exportLite">Open in browser (JupyterLite)<small>Runs on the study data in your browser while you're logged in, nothing to install</small></button>{% endif %}
             {% if public_demo %}<button id="exportLite">Open in browser (JupyterLite)<small>Runs the notebook in your browser, nothing to install</small></button>
             <p class="menu-note">The download also opens in <a href="{{ lite_url }}" target="_blank" rel="noopener">JupyterLite</a> or <a href="{{ binder_url }}" target="_blank" rel="noopener">Binder</a>: upload it into the <code>notebooks/</code> folder there, or into <code>notebooks/</code> of a clone of the repo.</p>{% endif %}
         </div>

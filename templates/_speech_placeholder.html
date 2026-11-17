@@ -1,0 +1,7 @@
+{# Patient profile: where speech measures will appear once recordings exist. Dimmed on purpose: no data yet. #}
+<div class="scard" id="speechPlaceholder">
+    <div class="scard-top">{% include "_mic_icon.html" %} Speech <span class="badge-wip">In progress</span></div>
+    <div class="scard-empty">No speech recordings yet</div>
+    <a href="{{ url_for('notebook_code', name='speech_features_starter') }}" data-speech-open>How this will work</a>
+</div>
+{% include "_speech_modal.html" %}

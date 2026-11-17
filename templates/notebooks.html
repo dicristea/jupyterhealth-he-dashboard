@@ -24,6 +24,28 @@
     </div>
 </div>
 {% endfor %}
+{% elif hosted_study %}
+<p class="sub">Exploratory analyses behind this dashboard, as Jupyter notebooks on the de-identified study data.</p>
+<div class="strip nb-explainer">
+    <span><strong>Run in your browser</strong> opens JupyterLite: Python runs on your computer, nothing to install, and the notebook loads the study data from this site while you're logged in. First load takes 30–60 s; use a laptop with Chrome, Edge or Firefox (not a private window). Then <em>Run → Run All Cells</em>.</span>
+    <span>Edits and outputs stay in your browser only. Outputs describe study participants: don't share them outside the study team. <em>Cohort → Export → Open in browser</em> does the same for any group of patients.</span>
+</div>
+{% if not lite_available %}<div class="notice">The in-browser notebooks aren't part of this deployment (JupyterLite wasn't built). Download a notebook and run it on a computer that has the study file.</div>{% endif %}
+{% for nb in notebooks %}
+<div class="card nb-card">
+    <div class="nb-head">
+        <div class="nb-icon">ipynb</div>
+        <div>
+            <h2>{{ nb.title }}</h2>
+            <p class="hint">{{ nb.description }} <code>notebooks/{{ nb.name }}.ipynb</code></p>
+        </div>
+    </div>
+    <div class="nb-actions">
+        {% if lite_available %}<div><a class="btn primary" href="{{ nb.lite_url }}" target="_blank" rel="noopener">Run in your browser</a><small>JupyterLite on the study data: first load ~30–60 s</small></div>
+        <div><a class="btn" href="{{ nb.download_url }}" download>Download notebook</a><small>Blank copy (no outputs) for your own Jupyter</small></div>{% endif %}
+    </div>
+</div>
+{% endfor %}
 {% else %}
 <p class="sub">Exploratory analyses behind this dashboard. They open in JupyterLab, where you can also chat with Jupyter AI.</p>
 
@@ -58,4 +80,5 @@
 fetch('{{ jupyter_base }}/api', {mode: 'no-cors'}).catch(() => { document.getElementById('jupyterNotice').hidden = false; });
 </script>
 {% endif %}
+{% include "_speech_card.html" %}
 {% endblock %}

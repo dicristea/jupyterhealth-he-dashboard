@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository == 'dicristea/ehr-wearable-he-dashboard'
+    if: github.repository == 'dicristea/jupyterhealth-he-dashboard'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -37,7 +37,7 @@ jobs:
           path: _site
 
   deploy:
-    if: github.repository == 'dicristea/ehr-wearable-he-dashboard'
+    if: github.repository == 'dicristea/jupyterhealth-he-dashboard'
     needs: build
     runs-on: ubuntu-latest
     environment:

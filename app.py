@@ -1,8 +1,9 @@
 """HE Clinician Dashboard: a simpler, clinician-facing view of the HE study's Oura data.
 
 Three tabs: Patients (list → personal profile), Cohort, Notebooks.
-Runs on 127.0.0.1 only. There is no login, so it must never be deployed with study data.
-The one exception is HE_PUBLIC_DEMO=1 (docs/hosting.md): synthetic data only, local-only features off.
+Runs on 127.0.0.1 with no login by default. Two hosted modes (docs/hosting.md), both with local-only features off:
+HE_PUBLIC_DEMO=1 serves synthetic data only; HE_HOSTED_STUDY=1 serves the de-identified study data downloaded
+from HE_DATA_URL and refuses to start without DEMO_PASSWORD.
 """
 from __future__ import annotations
 
@@ -12,15 +13,19 @@ import hmac
 import json
 import os
 import re
+import mimetypes
 import secrets
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import nbformat
-from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
+from flask import (Flask, Response, abort, jsonify, redirect, render_template, request, send_file, send_from_directory,
+                   session, url_for)
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import data
 
@@ -34,9 +39,9 @@ JUPYTER_ROOT = Path(os.environ.get("JUPYTER_ROOT", HERE)).expanduser().resolve()
 NOTEBOOK_DIRS = [Path(p).expanduser().resolve() for p in
                  os.environ.get("NOTEBOOK_DIRS", str(HERE / "notebooks")).split(os.pathsep) if p]
 # Public demo Notebooks tab: links to the public repo's notebooks on Binder and JupyterLite (docs/hosting.md).
-NOTEBOOK_REPO = os.environ.get("NOTEBOOK_REPO", "dicristea/ehr-wearable-he-dashboard")
+NOTEBOOK_REPO = os.environ.get("NOTEBOOK_REPO", "dicristea/jupyterhealth-he-dashboard")
 NOTEBOOK_REF = os.environ.get("NOTEBOOK_REF", "main")
-JUPYTERLITE_URL = os.environ.get("JUPYTERLITE_URL", "https://dicristea.github.io/ehr-wearable-he-dashboard").rstrip("/")
+JUPYTERLITE_URL = os.environ.get("JUPYTERLITE_URL", "https://dicristea.github.io/jupyterhealth-he-dashboard").rstrip("/")
 # Written out rather than globbed: the Docker image holds no notebooks/ folder, and a test keeps this in step with it.
 DEMO_NOTEBOOKS = [
     {"name": "deid_oura_data_exploration", "title": "Getting to know the dataset",
@@ -46,40 +51,107 @@ DEMO_NOTEBOOKS = [
      "description": "How groups of patients (for example decompensated vs. compensated) compare across the "
                     "study days, and whether patients cluster into a few recognisable types."},
 ]
-if data.PUBLIC_DEMO:
-    data.load()  # a misconfigured demo (study source, MRN map) should fail the deploy, not the first visitor
-# Optional shared password for the hosted demo (docs/hosting.md). Off unless DEMO_PASSWORD is set.
+# Shared password (docs/hosting.md). Optional for the synthetic demo, required for the hosted study site.
 DEMO_USER = os.environ.get("DEMO_USER", "demo")
 DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "")
+if data.HOSTED_STUDY and not DEMO_PASSWORD:  # checked before the download, so no data arrives on an open server
+    raise RuntimeError("HE_HOSTED_STUDY=1 serves study data and refuses to start without DEMO_PASSWORD")
+if data.hosted():
+    # Render terminates HTTPS in front of the app; trust its one proxy hop so redirects and cookies see https.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    data.load()  # a misconfigured host (wrong source, MRN map, failed download) should fail the deploy, not a visitor
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+    # Hosted sites are HTTPS-only; HE_COOKIE_INSECURE=1 lets a local http:// run of a hosted mode keep its login.
+    SESSION_COOKIE_SECURE=data.hosted() and os.environ.get("HE_COOKIE_INSECURE", "") != "1")
+OPEN_PATHS = {"/healthz", "/login", "/logout", "/robots.txt"}  # the host's health check can't log in
+
+
+def _login_token() -> str:
+    """What a logged-in session holds: tied to the current user, password and secret key, so changing any of them
+    logs everyone out."""
+    return hmac.new(app.secret_key.encode(), f"{DEMO_USER}:{DEMO_PASSWORD}".encode(), "sha256").hexdigest()
+
+
+def _logged_in() -> bool:
+    return hmac.compare_digest(str(session.get("login", "")), _login_token())
+
+
+def _safe_next(target: str | None) -> str:
+    """Only a path on this site: no scheme, no host, no protocol-relative //, no backslashes."""
+    if not target or not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return "/"
+    return target
 
 
 @app.before_request
 def demo_password():
-    if not DEMO_PASSWORD or request.path == "/healthz":  # the host's health check can't log in
+    if request.path in OPEN_PATHS or request.path.startswith("/static/"):
         return None
-    auth = request.authorization
-    given = f"{auth.username}:{auth.password}" if auth and auth.type == "basic" else ""
-    if hmac.compare_digest(given.encode(), f"{DEMO_USER}:{DEMO_PASSWORD}".encode()):
+    if not DEMO_PASSWORD:
+        if data.HOSTED_STUDY:  # fail closed, even if the start-up check was bypassed
+            return Response("Not configured.", 503)
         return None
-    return Response("Password required.", 401, {"WWW-Authenticate": 'Basic realm="HE dashboard demo", charset="UTF-8"'})
+    if _logged_in():
+        return None
+    if request.path.startswith("/api/") or request.method != "GET":
+        return Response("Login required.", 401, {"Cache-Control": "no-store"})
+    return redirect(url_for("login", next=request.full_path.rstrip("?")))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not DEMO_PASSWORD:
+        return redirect("/")
+    nxt = _safe_next(request.values.get("next"))
+    error = None
+    if request.method == "POST":
+        given = f"{request.form.get('username', '')}:{request.form.get('password', '')}"
+        if hmac.compare_digest(given.encode(), f"{DEMO_USER}:{DEMO_PASSWORD}".encode()):
+            session.clear()
+            session.permanent = True
+            session["login"] = _login_token()
+            return redirect(nxt)
+        time.sleep(LOGIN_FAIL_DELAY_S)  # slows password guessing; one shared password, so no per-user lockout
+        error = "Wrong username or password."
+    res = Response(render_template("login.html", next=nxt, error=error), 401 if error else 200)
+    res.headers["Cache-Control"] = "no-store"
+    return res
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login") if DEMO_PASSWORD else "/")
+
+
+LOGIN_FAIL_DELAY_S = 1.0
 
 
 @app.context_processor
 def inject_source():
     _, source = data.load()
-    return {"data_source": source, "public_demo": data.PUBLIC_DEMO}
+    return {"data_source": source, "public_demo": data.PUBLIC_DEMO, "hosted_study": data.HOSTED_STUDY,
+            "hosted": data.hosted()}
 
 
 @app.after_request
 def demo_headers(res):
-    if data.PUBLIC_DEMO:  # fake patient pages shouldn't show up in search results as if they were real
+    if data.hosted():  # neither fake nor study patient pages belong in search results
         res.headers["X-Robots-Tag"] = "noindex, nofollow"
     return res
 
 
+@app.route("/robots.txt")
+def robots():
+    if not data.hosted():
+        abort(404)
+    return Response("User-agent: *\nDisallow: /\n", mimetype="text/plain")
+
+
 def _local_only() -> None:
     """404 for features that need this computer (JupyterLab, writing files, a registered EHR client)."""
-    if data.PUBLIC_DEMO:
+    if data.hosted():
         abort(404)
 
 
@@ -128,7 +200,7 @@ LAUNCH_LOG: list[dict] = []  # in memory only, last 20 launches
 
 
 def _log_launch(**entry) -> None:
-    if data.PUBLIC_DEMO and entry.get("patient") == "no match":
+    if data.hosted() and entry.get("patient") == "no match":
         return  # the log is shared by every visitor, so keep free text typed by strangers out of it
     LAUNCH_LOG.insert(0, {"time": datetime.now().strftime("%b %d %H:%M:%S"), **entry})
     del LAUNCH_LOG[20:]
@@ -192,7 +264,7 @@ def ehr():
     return render_template("ehr.html", active="ehr", smart=SMART, mrn_system=data.MRN_SYSTEM, log=LAUNCH_LOG,
                            launch_url=url_for("ehr_launch", _external=True), redirect_uri=_redirect_uri(),
                            examples=examples, error=request.args.get("error"),
-                           mrn_map=None if data.PUBLIC_DEMO else os.environ.get("HE_MRN_MAP"))
+                           mrn_map=None if data.hosted() else os.environ.get("HE_MRN_MAP"))
 
 
 @app.route("/ehr/launch")
@@ -255,7 +327,7 @@ def _selection(args) -> dict:
 def cohort():
     sel = _selection(request.args)
     return render_template("cohort.html", active="cohort", summary=data.cohort_summary(sel["ids"]), sel=sel,
-                           nb_name=_notebook_name(sel), lite_url=LITE_URL, binder_url=EXPORT_BINDER_URL)
+                           nb_name=_notebook_name(sel), lite_url=_lite_url(), binder_url=EXPORT_BINDER_URL)
 
 
 @app.route("/api/cohort")
@@ -283,7 +355,9 @@ def cohort_report():
 # same notebook as a download and never touches disk (local and public demo). The GET also serves JupyterLite's
 # `?fromURL=`, which fetches cross-origin and names the file after the URL's last path segment, query string
 # included, so that link carries the filters base64url-encoded in the path instead.
-LITE_URL = f"{JUPYTERLITE_URL}/lab/index.html"
+# The hosted study site serves its own JupyterLite (built without data in Dockerfile.deid) at /lite/, same origin.
+def _lite_url() -> str:
+    return "/lite/lab/index.html" if data.HOSTED_STUDY else f"{JUPYTERLITE_URL}/lab/index.html"
 EXPORT_BINDER_URL = (f"https://mybinder.org/v2/gh/{NOTEBOOK_REPO}/{urllib.parse.quote(NOTEBOOK_REF, safe='')}"
                      "?urlpath=lab/tree/notebooks")
 NOTEBOOK_CORS_ORIGINS = {o.strip().rstrip("/") for o in
@@ -360,7 +434,11 @@ def _build_cohort_notebook(sel: dict, group: str) -> nbformat.NotebookNode:
     nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
     group_label = data.cohort_summary(sel["ids"])["groups"][group]
     filters = {str(k): str(v) for k, v in sel["params"].items()}
-    if data.PUBLIC_DEMO:
+    if data.HOSTED_STUDY:
+        where = ("Exported from the **password-protected study site**. Open it in the site's own JupyterLite "
+                 "(Notebooks tab): there `data.load()` fetches the de-identified study data from the site while you "
+                 "are logged in. 🔒 Don't share it with outputs.")
+    elif data.PUBLIC_DEMO:
         where = ("Exported from the **public demo**, so it runs on **synthetic data**: `data.load()` finds no study "
                  "file in Binder, JupyterLite or a fresh clone and builds the same 24 synthetic patients the demo "
                  "shows. Run it from the repo's `notebooks/` folder (in JupyterLite, upload it into `notebooks/`).")
@@ -423,6 +501,9 @@ def notebooks():
         return render_template("notebooks.html", active="notebooks", notebooks=_demo_notebooks(),
                                synthetic_doc=f"https://github.com/{NOTEBOOK_REPO}/blob/{NOTEBOOK_REF}/docs/synthetic-data.md",
                                repo_url=f"https://github.com/{NOTEBOOK_REPO}")
+    if data.HOSTED_STUDY:  # this site's own JupyterLite, on this data; no Binder or pre-run copies (no data at build)
+        return render_template("notebooks.html", active="notebooks", notebooks=_hosted_notebooks(),
+                               lite_available=(LITE_DIR / "index.html").is_file())
     return render_template("notebooks.html", active="notebooks", notebooks=_list_notebooks(),
                            jupyter_base=JUPYTER_BASE_URL, notebook_dirs=NOTEBOOK_DIRS)
 
@@ -435,6 +516,44 @@ def _demo_notebooks() -> list[dict]:
              "binder_url": f"https://mybinder.org/v2/gh/{NOTEBOOK_REPO}/{ref}"
                            f"?urlpath=lab/tree/notebooks/{nb['name']}.ipynb"}
             for nb in DEMO_NOTEBOOKS]
+
+
+def _hosted_notebooks() -> list[dict]:
+    return [{**nb, "lite_url": f"{_lite_url()}?path=notebooks/{nb['name']}.ipynb",
+             "download_url": f"/lite/files/notebooks/{nb['name']}.ipynb"} for nb in DEMO_NOTEBOOKS]
+
+
+# The hosted study site's JupyterLite: static files from Dockerfile.deid's builder stage, no data in them. Behind
+# the login like every page; the notebooks fetch the data from /api/study-data.csv.gz with the same cookie.
+LITE_DIR = Path(os.environ.get("HE_LITE_DIR", HERE / "lite_site")).expanduser()
+for _ext, _type in {".wasm": "application/wasm", ".mjs": "text/javascript", ".js": "text/javascript",
+                    ".json": "application/json", ".ipynb": "application/x-ipynb+json"}.items():
+    mimetypes.add_type(_type, _ext)
+
+
+@app.route("/lite/")
+@app.route("/lite/<path:path>")
+def lite(path: str = ""):
+    if not data.HOSTED_STUDY:
+        abort(404)
+    if path == "" or path.endswith("/"):
+        path += "index.html"
+    elif (LITE_DIR / path).is_dir():
+        return redirect(f"/lite/{path}/")
+    res = send_from_directory(LITE_DIR, path, max_age=0)  # safe_join: no escaping LITE_DIR
+    res.headers["Cache-Control"] = "private, no-cache"  # revalidate, so a redeploy shows up; never shared caches
+    return res
+
+
+@app.route("/api/study-data.csv.gz")
+def study_data():
+    """The downloaded study cache, for notebooks running in this site's JupyterLite (logged-in visitors only)."""
+    if not data.HOSTED_STUDY or data.HOSTED_DATA_FILE is None:
+        abort(404)
+    res = send_file(data.HOSTED_DATA_FILE, mimetype="application/gzip", max_age=0, conditional=False,
+                    download_name="study.v2.csv.gz")
+    res.headers.update({"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+    return res
 
 
 # Read-only notebook pages for the public demo, rendered on synthetic data in the Docker builder stage
@@ -474,6 +593,34 @@ def notebook_page(name):
     return res
 
 
+# Notebooks shown as read-only code in every mode (never run by the app). Both Dockerfiles copy these files.
+CODE_PAGES = {"speech_features_starter": "Speech features (starter)"}
+
+
+def _code_cells(source: str) -> list[dict]:
+    """Split a jupytext percent file into markdown and code cells, dropping the YAML header."""
+    cells: list[dict] = []
+    for block in re.split(r"^# %%", source, flags=re.M)[1:]:
+        head, _, body = block.partition("\n")
+        if "[markdown]" in head:
+            text = "\n".join(re.sub(r"^# ?", "", line) for line in body.splitlines())
+            cells.append({"kind": "markdown", "text": text.strip()})
+        elif body.strip():
+            cells.append({"kind": "code", "text": body.strip()})
+    return cells
+
+
+@app.route("/notebooks/code/<name>")
+def notebook_code(name):
+    if name not in CODE_PAGES:
+        abort(404)
+    path = HERE / "notebooks" / f"{name}.py"
+    if not path.is_file():
+        abort(404)
+    return render_template("notebook_code.html", active="notebooks", title=CODE_PAGES[name], file=path.name,
+                           cells=_code_cells(path.read_text(encoding="utf-8")))
+
+
 def _list_notebooks() -> list[dict]:
     out = []
     for folder in NOTEBOOK_DIRS:
@@ -497,7 +644,7 @@ def _list_notebooks() -> list[dict]:
 
 
 if __name__ == "__main__":
-    if data.PUBLIC_DEMO:  # only the synthetic demo may listen beyond this computer
+    if data.hosted():  # only the hosted modes may listen beyond this computer
         app.run(host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", 5050)), debug=False)
     else:
         app.run(host="127.0.0.1", port=int(os.environ.get("PORT", 5050)), debug=os.environ.get("FLASK_DEBUG", "1") == "1")

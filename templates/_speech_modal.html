@@ -1,0 +1,12 @@
+{# Shared "speech isn't connected yet" dialog. Opened by any element with data-speech-open (static/speech.js). #}
+<div class="speech-modal" id="speechModal" role="dialog" aria-modal="true" aria-labelledby="speechModalTitle" hidden>
+    <div class="speech-modal-box">
+        <h2 id="speechModalTitle">Speech recordings aren't connected yet</h2>
+        <p>Once recordings are added, this code will run on each one and add a Speech section to every patient's profile, next to sleep and activity. Recordings stay on study computers; only the measurements are shared.</p>
+        <div class="speech-modal-actions">
+            <a class="btn primary" href="{{ url_for('notebook_code', name='speech_features_starter') }}">View the code</a>
+            <button type="button" class="btn" data-speech-close>Close</button>
+        </div>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='speech.js') }}" defer></script>

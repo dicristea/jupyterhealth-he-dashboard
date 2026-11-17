@@ -1,6 +1,6 @@
 # HE Clinician Dashboard
 
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/dicristea/ehr-wearable-he-dashboard/main?urlpath=lab/tree/notebooks) · License: [BSD-3-Clause](LICENSE)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/dicristea/jupyterhealth-he-dashboard/main?urlpath=lab/tree/notebooks) · License: [BSD-3-Clause](LICENSE)
 
 A clinician-facing dashboard for a hepatic encephalopathy (HE) study in which patients with cirrhosis wear an Oura ring. Built at Cornell Tech with [JupyterHealth](https://jupyterhealth.org).
 
@@ -12,9 +12,9 @@ A clinician-facing dashboard for a hepatic encephalopathy (HE) study in which pa
 |---|---|
 | **[Live demo](https://he-dashboard-synthetic-demo.onrender.com)** | The dashboard itself: Patients, Cohort, Notebooks and EHR launch tabs. Free host: the first visit after a quiet period can take up to a minute to wake up. |
 | **Read-only notebooks**: [exploration](https://he-dashboard-synthetic-demo.onrender.com/notebooks/view/deid_oura_data_exploration) · [trajectories & phenotypes](https://he-dashboard-synthetic-demo.onrender.com/notebooks/view/he_trajectories_phenotypes) | The two analysis notebooks, already run on synthetic data. Nothing to install or wait for. |
-| **Run in your browser** (JupyterLite): [exploration](https://dicristea.github.io/ehr-wearable-he-dashboard/lab/index.html?path=notebooks/deid_oura_data_exploration.ipynb) · [trajectories & phenotypes](https://dicristea.github.io/ehr-wearable-he-dashboard/lab/index.html?path=notebooks/he_trajectories_phenotypes.ipynb) | A full JupyterLab with the notebooks, running entirely in your browser. Edit and re-run anything. Then use **Run → Run All Cells**. First load takes 30–60 s; best on a laptop (Chrome, Firefox or Safari). |
-| **Run on Binder**: [open JupyterLab](https://mybinder.org/v2/gh/dicristea/ehr-wearable-he-dashboard/main?urlpath=lab/tree/notebooks) | The same notebooks on a free cloud server, with full Python. Can take a few minutes to start. |
-| **Code**: [this repository](https://github.com/dicristea/ehr-wearable-he-dashboard) | Run it on your own computer with the [quickstart](#quickstart) below. |
+| **Run in your browser** (JupyterLite): [exploration](https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html?path=notebooks/deid_oura_data_exploration.ipynb) · [trajectories & phenotypes](https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html?path=notebooks/he_trajectories_phenotypes.ipynb) | A full JupyterLab with the notebooks, running entirely in your browser. Edit and re-run anything. Then use **Run → Run All Cells**. First load takes 30–60 s; best on a laptop (Chrome, Firefox or Safari). |
+| **Run on Binder**: [open JupyterLab](https://mybinder.org/v2/gh/dicristea/jupyterhealth-he-dashboard/main?urlpath=lab/tree/notebooks) | The same notebooks on a free cloud server, with full Python. Can take a few minutes to start. |
+| **Code**: [this repository](https://github.com/dicristea/jupyterhealth-he-dashboard) | Run it on your own computer with the [quickstart](#quickstart) below. |
 
 Inside the live demo you can also **export a notebook for any group of patients** (Cohort → Export → Download notebook, or Open in browser) and **simulate opening a patient from an EHR** (EHR launch tab → click a `JH-DEMO…` MRN).
 
@@ -24,19 +24,19 @@ Each patient's ring produces a daily export. The dashboard turns it into views a
 
 | Tab | What you can do |
 |---|---|
-| **Patients** | Filter and sort the patient list (HE status, Child-Pugh, decompensation, age, MELD, data quality…). *Needs attention* flags patients whose last 7 days are worse than their own usual range. Click a patient for their profile: rest, regularity, HRV, heart rate, steps and SpO₂ against their own baseline, plus 24-hour activity patterns. |
+| **Patients** | Filter and sort the patient list (HE status, Child-Pugh, decompensation, age, MELD, data quality…). *Needs attention* flags patients whose last 7 days are worse than their own usual range. Click a patient for their profile: rest, regularity, HRV, heart rate, steps and SpO₂ against their own baseline, 24-hour activity patterns, and a clinical snapshot at enrolment (MELD, Child-Pugh, decompensation, HE, frailty, questionnaires) beside them. |
 | **Cohort** | Compare groups (e.g. decompensated vs. compensated) on any measure: weekly trajectories, one dot per patient, and a Mann-Whitney test. **Export** a PDF report or a ready-to-run notebook for the selected patients. |
-| **Notebooks** | The exploratory analyses behind the dashboard. In the demo: view them read-only, or run them in JupyterLite or on Binder. Locally: open them in your own JupyterLab. |
+| **Notebooks** | The exploratory analyses behind the dashboard. In the demo: view them read-only, or run them in JupyterLite or on Binder. Locally: open them in your own JupyterLab. A **Speech features** card (work in progress, awaiting recordings) shows the speech code read-only; patient profiles have a matching Speech placeholder. |
 | **EHR launch** | A minimal SMART on FHIR launch: an EHR such as Medplum opens the dashboard on the patient in its chart, matched by MRN. *Simulate launch* tries it without an EHR. |
 
-It's a slimmed-down companion to the research prototype [oura-clinical-workbench](https://github.com/dicristea/oura-clinical-workbench), which keeps the ML lab, SHAP and AI assistant.
+It's a slimmed-down companion to the research prototype [jupyterhealth-he-workbench-v1](https://github.com/dicristea/jupyterhealth-he-workbench-v1), which keeps the ML lab, SHAP and AI assistant.
 
 ## Quickstart
 
 Needs Python 3 and Git (tested with Python 3.13 on macOS). No study data and no R needed.
 
 ```bash
-git clone https://github.com/dicristea/ehr-wearable-he-dashboard.git && cd ehr-wearable-he-dashboard
+git clone https://github.com/dicristea/jupyterhealth-he-dashboard.git && cd jupyterhealth-he-dashboard
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python scripts/generate_synthetic_data.py
@@ -55,6 +55,7 @@ Open <http://127.0.0.1:5050>. You should see 24 synthetic patients and an amber 
 |---|---|
 | `notebooks/deid_oura_data_exploration.py` | A beginner-friendly tour of the dataset: who is in it, how complete it is, the sleep proxies, and what exists compared with the research workbench. |
 | `notebooks/he_trajectories_phenotypes.py` | Group trajectories over the study, individual phenotypes (clustering), and why before/after-event analysis needs an event table. |
+| `notebooks/speech_features_starter.py` | Acoustic features (pitch, jitter, shimmer, HNR, formants, pauses, MFCCs) from voice recordings, one row per recording. Feature extraction only, not a clinical model. Needs `pip install -r requirements-speech.txt` and your own recordings in `HE_SPEECH_DIR` (none ship with the repo; voices are identifiable, so keep them out of it). Doesn't run in the online demo or JupyterLite; the dashboard shows its code read-only at `/notebooks/code/speech_features_starter`. |
 
 They are stored as [jupytext](https://jupytext.readthedocs.io) `.py` files with no outputs; `.ipynb` copies are git-ignored because outputs can contain data. To run them locally:
 

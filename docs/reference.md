@@ -7,7 +7,7 @@ How the dashboard is put together, how every measure is computed, and every sett
 ## Architecture
 
 ```
-ehr-wearable-he-dashboard/
+jupyterhealth-he-dashboard/
 ├── app.py                 Flask routes, SMART on FHIR launch, notebook export
 ├── data.py                loading, synthetic generator, derived measures, page payloads
 ├── templates/             Jinja pages (all extend base.html)
@@ -23,6 +23,7 @@ ehr-wearable-he-dashboard/
 ├── lite/, scripts/build_jupyterlite.sh   JupyterLite site (GitHub Pages, synthetic data)
 ├── Dockerfile, .dockerignore, render.yaml   public synthetic demo only
 ├── requirements-notebooks.txt   notebook stack for the Dockerfile's builder stage
+├── requirements-speech.txt      Praat/librosa stack for the speech notebook only (also in binder/)
 └── requirements.txt
 ```
 
@@ -40,11 +41,12 @@ ehr-wearable-he-dashboard/
                          app.py routes → Jinja templates / JSON → static/charts.js in the browser
 ```
 
-1. **Source selection** (`data.load()`, controlled by `HE_DATA_SOURCE` and `HE_PUBLIC_DEMO`):
+1. **Source selection** (`data.load()`, controlled by `HE_DATA_SOURCE`, `HE_PUBLIC_DEMO` and `HE_HOSTED_STUDY`):
 
    | Mode | Reads |
    |---|---|
    | `HE_PUBLIC_DEMO=1` | always the in-memory cohort `synthetic_cohort()` (24 patients, seed 7). Refuses to start with `HE_DATA_SOURCE=study` or `HE_MRN_MAP` |
+   | `HE_HOSTED_STUDY=1` | the gzipped `.v2.csv` cache downloaded once from `HE_DATA_URL` (source `study`). Refuses to start without `DEMO_PASSWORD` or `HE_DATA_URL`, with `HE_DATA_SOURCE=synthetic` or `HE_MRN_MAP`, or together with `HE_PUBLIC_DEMO` ([hosting.md](hosting.md#hosted-de-identified-site)) |
    | `HE_DATA_SOURCE=synthetic` | `HE_SYNTHETIC_FILE` (error if missing) |
    | `HE_DATA_SOURCE=study` | `HE_DATA_FILE` (error if missing) |
    | `HE_DATA_SOURCE=auto` (default) | `HE_DATA_FILE` if it exists, otherwise the in-memory synthetic cohort |
@@ -67,7 +69,13 @@ ehr-wearable-he-dashboard/
 | `GET /api/cohort/notebook.ipynb?group=`, `GET /api/cohort/notebook/<token>/<name>.ipynb` | The same notebook as a download, never written to disk (also in the demo); the second form carries the filters base64url-encoded for JupyterLite's `fromURL`. CORS only for `NOTEBOOK_CORS_ORIGINS` |
 | `GET /notebooks` | Notebooks tab |
 | `GET /notebooks/view/<name>` | Read-only notebook page (public demo only; rendered on synthetic data when the image is built) |
+| `GET /notebooks/code/<name>` | Read-only code of a notebook in `CODE_PAGES` (the speech starter), every mode; never executed. Both Docker images copy that one `.py` |
 | `GET /ehr`, `/ehr/launch`, `/ehr/callback`, `/ehr/simulate?mrn=` | SMART on FHIR launch (launch and callback are local only) |
+| `GET /healthz` | Host health check; open even with a password set |
+| `GET`/`POST /login`, `GET /logout` | Login page and logout when `DEMO_PASSWORD` is set (signed session cookie) |
+| `GET /lite/<path>` | The hosted study site's own JupyterLite (static, behind the login; hosted study only, 404 otherwise) |
+| `GET /api/study-data.csv.gz` | The downloaded study cache for that JupyterLite (logged in, hosted study only, `no-store`) |
+| `GET /robots.txt` | Disallow all (hosted modes only; 404 locally) |
 
 ## How the measures are computed
 
@@ -83,6 +91,7 @@ All of this is in `data.py`. The input is one row per participant-day. Oura's `c
 | **MET** | Study data: per-minute MET → five-minute means (see Architecture). The **24-hour activity profile** shows, for each 5-minute slot, the 10th/25th/50th/75th/90th percentile of MET across the patient's valid days, plus the share of valid days the slot was rest. **Time in activity classes** is the share of slots per class and the average hours per day, over valid days. The **activity explorer** shows raw 5-minute MET and class for 1, 3 or 7 consecutive days. |
 | **Measure cards** (profile) | For each measure in `data.PATIENT_TILES`: *last 7* = median of the patient's last 7 valid-day values (the last 7 non-missing values, not the last 7 calendar days); *usual range* = the patient's own 25th–75th percentile over all valid days; status = below / typical / above. **Trend** (needs ≥ 28 values): median of the last 14 values vs. the 28 before; the difference divided by the usual-range width (IQR) above +0.5 is *Increasing*, below −0.5 *Decreasing*, otherwise *Stable*. |
 | **Needs attention** (Patients tab) | For each measure in `PATIENT_TILES` with at least 14 valid-day values: flag it when the median of the last 7 values is outside the patient's own **10th–90th percentile** in the worse direction (lower is worse for night rest, regularity, HRV, steps and SpO₂; higher is worse for heart rate; rest midpoint never flags). Stricter than the cards' 25–75% range so ordinary weeks don't trigger it. A patient needs attention if any measure is flagged. |
+| **Clinical snapshot** (profile side panel) | Baseline (enrolment) clinical fields from the patient's first row, grouped as in `data.CLINICAL_SNAPSHOT`: liver severity, decompensation, HE, frailty, etiology, patient-reported. A column the data lacks is left out and a group with no columns is hidden; a present column with no value shows "—". 0/1 fields show as No/Yes. `meld_cat` and `lfi_cat` are not shown (unlabelled numeric codes). No labs, medications over time, imaging or hospitalizations yet: the file has none. |
 | **Ring wear coverage** (profile) | Share of study days 1…last day that are valid (days missing from the file count as not valid), plus the median daily wear `1 − non_wear_pct`. The Patients-tab "valid days %" and the valid-days filter use the share of rows in the file instead. |
 | **HE status** | `Overt` if `anyOHE == 1`, else `Covert` if `che_phes == "Yes"`, else `No` if `anyhe == 0`, otherwise unknown. Clinical fields are baseline only (first row per patient). |
 | **Patient-list values** | Medians over valid days. The sparkline is the 7-day rolling mean of night rest (at least 3 values), every third day. |
@@ -100,17 +109,23 @@ Every environment variable the code reads:
 | `HE_SYNTHETIC_FILE` | `data.py`, `seed_medplum.py` | `./synthetic_data/synthetic_he.csv.gz` | CSV read when `HE_DATA_SOURCE=synthetic` |
 | `HE_CACHE_DIR` | `data.py` | `<parent of the data folder>/exploration_outputs/_cache` | Where the `.rds` → CSV cache is written |
 | `HE_PUBLIC_DEMO` | `data.py`, `app.py` | off | `1`/`true`/`yes`: public synthetic demo ([docs/hosting.md](hosting.md)) |
-| `DEMO_PASSWORD`, `DEMO_USER` | `app.py` | unset, `demo` | Optional HTTP basic auth on every route except `/healthz` ([docs/hosting.md](hosting.md)) |
+| `HE_HOSTED_STUDY` | `data.py`, `app.py`, `Dockerfile.deid` | off | `1`/`true`/`yes`: password-protected hosted site on the de-identified study data ([docs/hosting.md](hosting.md#hosted-de-identified-site)); forced on by `Dockerfile.deid` |
+| `HE_DATA_URL` | `data.py` | unset | Hosted study only: URL of the gzipped `.v2.csv` cache, normally a private GitHub release asset API URL |
+| `HE_DATA_TOKEN` | `data.py` | unset | Hosted study only: token sent as `Authorization: Bearer` to `HE_DATA_URL` (not forwarded on redirect, never logged) |
+| `DEMO_PASSWORD`, `DEMO_USER` | `app.py` | unset, `demo` | Login page on every route except `/healthz`, `/login`, `/logout`, `/robots.txt`, `/static/`: optional in the demo, **required** with `HE_HOSTED_STUDY` ([docs/hosting.md](hosting.md#optional-shared-password)) |
+| `HE_COOKIE_INSECURE` | `app.py` | unset | `1`: drop the Secure flag on the session cookie, only for running a hosted mode over local `http://` |
+| `HE_LITE_DIR` | `app.py` | `lite_site/` | Hosted study only: the built JupyterLite served at `/lite/` (`Dockerfile.deid` puts it there; [jupyterlite.md](jupyterlite.md#hosted-study-site)) |
+| `LITE_VARIANT` | `scripts/build_jupyterlite.sh` | `public` | `hosted-study`: build the study site's JupyterLite with no data and the `hosted_study.json` marker |
 | `HE_MRN_MAP` | `data.py`, `app.py` | unset | CSV `mrn,study_id` **outside the repo**, for real patients only after IRB approval and authentication. Refused in demo mode |
 | `PORT` | `app.py`, `Dockerfile` | `5050` (`8000` in the container) | Port |
-| `HOST` | `app.py` | `127.0.0.1` | Bind address, **only honoured when `HE_PUBLIC_DEMO=1`**; otherwise always `127.0.0.1` |
+| `HOST` | `app.py` | `127.0.0.1` | Bind address, **only honoured in a hosted mode** (`HE_PUBLIC_DEMO=1` or `HE_HOSTED_STUDY=1`); otherwise always `127.0.0.1` |
 | `FLASK_DEBUG` | `app.py` | `1` | Flask debugger/reloader for local runs; always off in demo mode |
 | `FLASK_SECRET_KEY` | `app.py` | random per process | Session signing key (sessions reset on restart without it) |
 | `JUPYTER_BASE_URL` | `app.py` | `http://localhost:8888` | JupyterLab URL for notebook links |
 | `JUPYTER_ROOT` | `app.py` | the repo folder | Folder JupyterLab was started from (links are relative to it) |
 | `NOTEBOOK_DIRS` | `app.py` | `./notebooks` | Folders (separated by `:`, `;` on Windows) listed in the Notebooks tab; exports go to the first |
-| `NOTEBOOK_REPO`, `NOTEBOOK_REF` | `app.py` | `dicristea/ehr-wearable-he-dashboard`, `main` | GitHub repo and branch the demo Notebooks tab and Cohort export link to on Binder (and for docs links) |
-| `JUPYTERLITE_URL` | `app.py` | `https://dicristea.github.io/ehr-wearable-he-dashboard` | JupyterLite site the demo Notebooks tab and Cohort export (`?fromURL=`) link to |
+| `NOTEBOOK_REPO`, `NOTEBOOK_REF` | `app.py` | `dicristea/jupyterhealth-he-dashboard`, `main` | GitHub repo and branch the demo Notebooks tab and Cohort export link to on Binder (and for docs links) |
+| `JUPYTERLITE_URL` | `app.py` | `https://dicristea.github.io/jupyterhealth-he-dashboard` | JupyterLite site the demo Notebooks tab and Cohort export (`?fromURL=`) link to |
 | `NOTEBOOK_CORS_ORIGINS` | `app.py` | `https://dicristea.github.io` | Comma-separated origins allowed to fetch exported notebooks cross-origin (JupyterLite) |
 | `SMART_CLIENT_ID` | `app.py` | unset | Client ID from the EHR's app registration |
 | `SMART_CLIENT_SECRET` | `app.py` | unset | Client secret (optional: PKCE is always used) |
@@ -121,4 +136,6 @@ Every environment variable the code reads:
 | `MEDPLUM_CLIENT_ID`, `MEDPLUM_CLIENT_SECRET` | `seed_medplum.py` | unset | Client-credentials login for seeding |
 | `JH_DATA_DIR` | `notebooks/deid_oura_data_exploration.py` | `../../de-identified data` (relative to `notebooks/`) | Data folder for the exploration notebook |
 | `JH_DATA_FILE` | `notebooks/he_trajectories_phenotypes.py` | the single `.rds` file in `../../de-identified data/` (relative to `notebooks/`) | Study file for the trajectories notebook |
+| `HE_SPEECH_DIR` | `notebooks/speech_features_starter.py` | `../speech recordings/` (next to the repo) | Folder of voice recordings (`.wav`, `.flac`, `.ogg`; `.mp3`/`.m4a` need ffmpeg). Never inside the repo |
+| `HE_SPEECH_OUTPUT_DIR` | `notebooks/speech_features_starter.py` | `notebook_outputs/` | Where `speech_features.csv` and its `.params.json` are written |
 

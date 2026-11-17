@@ -1,0 +1,15 @@
+{# Notebooks tab: the speech feature code, shown as work in progress in every mode. #}
+<div class="card nb-card">
+    <div class="nb-head">
+        <div class="nb-icon speech-icon">{% include "_mic_icon.html" %}</div>
+        <div>
+            <h2>Speech features <span class="badge-wip">In progress · awaiting recordings</span></h2>
+            <p class="hint">Measures how someone speaks — pitch, voice steadiness and pauses — from short voice recordings. <code>notebooks/speech_features_starter.py</code></p>
+        </div>
+    </div>
+    <div class="nb-actions">
+        <div><a class="btn primary" href="{{ url_for('notebook_code', name='speech_features_starter') }}">View code</a><small>Read-only, nothing runs</small></div>
+        <div><button type="button" class="btn" data-speech-open>Upload recordings</button><small>Not connected yet</small></div>
+    </div>
+</div>
+{% include "_speech_modal.html" %}
