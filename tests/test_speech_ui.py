@@ -36,7 +36,9 @@ def test_notebooks_tab_has_speech_card_and_dialog(client):
 def test_code_page_shows_source_without_running_it(client):
     res = client.get("/notebooks/code/speech_features_starter")
     assert res.status_code == 200
-    assert b"def extract_features" in res.data and b"PARAMS" in res.data
+    assert b"extract_features" in res.data and b"PARAMS" in res.data
+    assert b"<strong>Pitch (F0):</strong>" in res.data and b"**" not in res.data  # notes rendered, not raw Markdown
+    assert b'class="tok-keyword">def</span>' in res.data and b'id="codeToggle"' in res.data
     assert b"jupytext:" not in res.data  # header dropped
     assert client.get("/notebooks/code/not_a_notebook").status_code == 404
     assert client.get("/notebooks/code/..%2Fapp").status_code == 404
@@ -61,3 +63,10 @@ def test_both_images_ship_the_speech_source():
     for name in ("Dockerfile", "Dockerfile.deid"):
         assert "COPY notebooks/speech_features_starter.py notebooks/" in (root / name).read_text()
     assert set(app_module.CODE_PAGES) == {"speech_features_starter"}
+
+
+def test_code_page_escapes_html():
+    out = str(app_module._py_html('x = "<script>"  # <b>'))
+    assert "<script>" not in out and "&lt;script&gt;" in out and "&lt;b&gt;" in out
+    md = str(app_module._md_html("# T\n- **a** <i>\n> `q`"))
+    assert "<h2>T</h2>" in md and "<strong>a</strong> &lt;i&gt;" in md and "<blockquote><code>q</code></blockquote>" in md

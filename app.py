@@ -25,6 +25,7 @@ from pathlib import Path
 import nbformat
 from flask import (Flask, Response, abort, jsonify, redirect, render_template, request, send_file, send_from_directory,
                    session, url_for)
+from markupsafe import Markup, escape
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import data
@@ -609,6 +610,81 @@ def _code_cells(source: str) -> list[dict]:
         elif body.strip():
             cells.append({"kind": "code", "text": body.strip()})
     return cells
+
+
+_PY_TOKEN = re.compile(
+    r'(?P<comment>#[^\n]*)'
+    r'|(?P<string>[rRbBfF]{0,2}(?:"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'))'
+    r'|(?P<keyword>\b(?:and|as|def|elif|else|except|for|from|if|import|in|is|lambda|not|None|or|return|True|False|try|while|with|yield)\b)'
+    r'|(?P<number>\b\d+(?:\.\d+)?(?:e-?\d+)?\b)')
+
+
+def _py_html(code: str) -> Markup:
+    """Light syntax colouring for the read-only code page; every piece is escaped."""
+    out, pos = [], 0
+    for m in _PY_TOKEN.finditer(code):
+        out.append(escape(code[pos:m.start()]))
+        out.append(Markup('<span class="tok-{}">{}</span>').format(m.lastgroup, m.group()))
+        pos = m.end()
+    out.append(escape(code[pos:]))
+    return Markup("").join(out)
+
+
+def _md_inline(text: str) -> Markup:
+    html = str(escape(text))
+    html = re.sub(r"`([^`]+)`", r"<code>\1</code>", html)
+    html = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", html)
+    html = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"<em>\1</em>", html)
+    return Markup(html)
+
+
+def _md_html(text: str) -> Markup:
+    """The small Markdown subset the notebooks' notes use: headings, bullet lists, quotes, paragraphs."""
+    blocks: list[Markup] = []
+    para: list[str] = []
+    items: list[str] = []
+    quote: list[str] = []
+
+    def flush():
+        if para:
+            blocks.append(Markup("<p>{}</p>").format(_md_inline(" ".join(para))))
+            para.clear()
+        if items:
+            blocks.append(Markup("<ul>{}</ul>").format(Markup("").join(
+                Markup("<li>{}</li>").format(_md_inline(i)) for i in items)))
+            items.clear()
+        if quote:
+            blocks.append(Markup("<blockquote>{}</blockquote>").format(_md_inline(" ".join(quote))))
+            quote.clear()
+
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            flush()
+        elif m := re.match(r"(#{1,4})\s+(.*)", s):
+            flush()
+            level = min(len(m.group(1)) + 1, 4)  # the page title is the h1
+            blocks.append(Markup("<h{0}>{1}</h{0}>").format(level, _md_inline(m.group(2))))
+        elif s.startswith(("- ", "* ")):
+            if para or quote:
+                flush()
+            items.append(s[2:])
+        elif s.startswith(">"):
+            if para or items:
+                flush()
+            quote.append(s.lstrip("> ").strip())
+        elif items and line.startswith("  "):
+            items[-1] += " " + s  # continuation of a list item
+        else:
+            if items or quote:
+                flush()
+            para.append(s)
+    flush()
+    return Markup("").join(blocks)
+
+
+app.jinja_env.filters["py_html"] = _py_html
+app.jinja_env.filters["md_html"] = _md_html
 
 
 @app.route("/notebooks/code/<name>")

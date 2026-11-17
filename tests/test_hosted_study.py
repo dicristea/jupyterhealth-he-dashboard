@@ -239,6 +239,6 @@ def test_speech_code_page_and_card_in_hosted_mode(hosted):
     assert anon.status_code == 302 and "/login" in anon.headers["Location"]
     c = _client()
     res = c.get("/notebooks/code/speech_features_starter")
-    assert res.status_code == 200 and b"def extract_features" in res.data
+    assert res.status_code == 200 and b"extract_features" in res.data
     nbs = c.get("/notebooks")
     assert b"Speech features" in nbs.data and b"Upload recordings" in nbs.data

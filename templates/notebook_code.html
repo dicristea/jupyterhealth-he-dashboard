@@ -6,10 +6,23 @@
         <h1>{{ title }} <span class="badge-wip">In progress · awaiting recordings</span></h1>
         <p class="sub">Read-only code, <code>notebooks/{{ file }}</code>. Nothing runs here: this page only shows the code.</p>
     </div>
+    <button type="button" class="btn" id="codeToggle" aria-pressed="false">Hide code</button>
     <a class="btn" href="/notebooks">← Notebooks</a>
 </div>
+<article class="code-page" id="codePage">
 {% for cell in cells %}
-{% if cell.kind == 'markdown' %}<div class="code-note">{{ cell.text }}</div>
-{% else %}<pre class="code-cell"><code>{{ cell.text }}</code></pre>{% endif %}
+{% if cell.kind == 'markdown' %}<section class="code-note">{{ cell.text | md_html }}</section>
+{% else %}<pre class="code-cell"><code>{{ cell.text | py_html }}</code></pre>{% endif %}
 {% endfor %}
+</article>
+<script>
+(function () {
+    var btn = document.getElementById("codeToggle"), page = document.getElementById("codePage");
+    btn.addEventListener("click", function () {
+        var hidden = page.classList.toggle("hide-code");
+        btn.textContent = hidden ? "Show code" : "Hide code";
+        btn.setAttribute("aria-pressed", hidden ? "true" : "false");
+    });
+})();
+</script>
 {% endblock %}

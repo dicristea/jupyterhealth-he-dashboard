@@ -224,8 +224,21 @@ button.btn { font-family: inherit; cursor: pointer; }
 .speech-modal-box h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .speech-modal-box p { font-size: 14px; color: #334155; margin-bottom: 18px; }
 .speech-modal-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
-.code-note { white-space: pre-wrap; font-size: 13px; color: #334155; background: #fff; border-left: 3px solid var(--line); padding: 10px 14px; margin: 0 0 12px; border-radius: 0 8px 8px 0; }
-.code-cell { background: #0f172a; color: #e2e8f0; font-size: 12px; line-height: 1.5; padding: 12px 14px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; }
+.code-page { max-width: 900px; }
+.code-note { font-size: 14px; line-height: 1.6; color: #1e293b; margin: 22px 0 10px; }
+.code-note h2 { font-size: 18px; margin: 0 0 8px; }
+.code-note h3, .code-note h4 { font-size: 15px; margin: 0 0 6px; }
+.code-note p { margin: 0 0 8px; }
+.code-note ul { margin: 0 0 8px 20px; padding: 0; }
+.code-note li { margin: 2px 0; }
+.code-note blockquote { margin: 8px 0; padding: 8px 12px; background: var(--amber-soft); border-left: 3px solid #f59e0b; border-radius: 0 8px 8px 0; color: #78350f; }
+.code-cell { background: #f8fafc; color: #0f172a; border: 1px solid var(--line); font-size: 13px; line-height: 1.55; padding: 12px 14px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; tab-size: 4; }
+.code-cell code { background: none; padding: 0; border-radius: 0; font-size: inherit; color: inherit; }
+.tok-comment { color: #64748b; font-style: italic; }
+.tok-string { color: #047857; }
+.tok-keyword { color: #7c3aed; font-weight: 600; }
+.tok-number { color: #b45309; }
+.code-page.hide-code .code-cell { display: none; }
 
 /* Login page (shared password on a hosted site) */
 .login-page { max-width: 380px; padding-top: 12vh; }
