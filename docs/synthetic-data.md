@@ -122,6 +122,14 @@ The values are hand-picked, round and clinically plausible for a cirrhosis cohor
 6. **SpO₂.** Present on a random `spo2.day_share` (40%) of days, normal with mean 97% and SD 1.
 7. `day_type` is `Weekend` when `days_since_start % 7` is 6 or 0. Nothing else depends on it.
 
+## Medications and clinical history
+
+The patient profile's Clinical snapshot has **Medications** and **Clinical history** dropdowns. The study file has neither, so on study data they say so. On synthetic data the app makes a few illustrative rows per patient when the page loads (`data.synthetic_clinical_extras`; nothing is stored, and they aren't columns in the CSV). Every row is tagged *Synthetic* on the page. They're there to show the layout, not to model anything: no measure or test uses them.
+
+- **Seeded by patient id** (with the generator's default seed, `data.EXTRAS_SEED`), so a patient always gets the same rows, whichever seed made the cohort.
+- **Medications (0–4)** follow the patient's baseline fields: HE meds → lactulose, plus rifaximin (always after overt HE, otherwise half the time); ascites → spironolactone, plus furosemide 70% of the time; variceal bleeding history → nadolol, otherwise decompensated patients get carvedilol 40% of the time. Each is "before enrolment" (70%) or "since study day N".
+- **Clinical history (0–4 events)**, by study day within the patient's own days (the data has no calendar dates): HCC surveillance imaging (ultrasound; MRI for 30% of compensated patients) for 75% of patients, usually followed by an AFP check within a week; for decompensated patients only, a hospitalization half the time (overt HE episode if they've had overt HE, else paracentesis if they have ascites, else upper GI bleed) and MELD labs 40% of the time.
+
 ## Built-in relationships
 
 The only link between clinical status and the wearable data is **decompensation**. By construction, decompensated participants have:

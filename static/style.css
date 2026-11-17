@@ -74,7 +74,20 @@ table.list td.id { font-weight: 600; color: var(--ink); }
 .cp-val { font-size: 13px; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
 .cp-val.missing { color: var(--faint); font-weight: 500; }
 .cp-empty { font-size: 12px; color: var(--faint); margin-bottom: 10px; }
-.cp-foot { font-size: 11px; color: var(--faint); border-top: 1px solid var(--soft); padding-top: 10px; }
+.cp-section { border-top: 1px solid var(--soft); }
+.cp-section > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 2px; font-size: 13px; font-weight: 600; color: var(--ink); border-radius: 6px; }
+.cp-section > summary::-webkit-details-marker { display: none; }
+.cp-section > summary::after { content: ""; margin-left: auto; width: 7px; height: 7px; border-right: 2px solid var(--muted);
+    border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform 0.15s; }
+.cp-section[open] > summary::after { transform: rotate(-135deg); }
+.cp-section > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.cp-sub { font-size: 10px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.cp-tag { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--amber-soft); color: #92400e; }
+.cp-section-body { padding: 2px 0 8px; }
+.cp-med { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
+.cp-med-name { font-size: 13px; font-weight: 700; color: var(--ink); }
+.cp-med-name span { font-weight: 500; color: var(--muted); margin-left: 4px; }
 @media (max-width: 1100px) {
     .pt-layout { grid-template-columns: 1fr; }
     .pt-main, .clinical-panel { grid-column: 1; grid-row: auto; }

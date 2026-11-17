@@ -18,6 +18,7 @@ import sys
 import tempfile
 import urllib.parse
 import urllib.request
+import zlib
 from functools import lru_cache
 from pathlib import Path
 
@@ -117,6 +118,72 @@ CLINICAL_SNAPSHOT = {
     "Patient-reported": [("psqiglobal", "Sleep quality (PSQI)"), ("cldq_total", "CLDQ total"),
                          ("cldq_fatigue", "CLDQ fatigue"), ("cldq_activity", "CLDQ activity")],
 }
+
+
+# The panel's three dropdowns. The study file has no medication list or dated clinical events, so on study data
+# the last two only say so; on synthetic data a few illustrative rows are generated (synthetic_clinical_extras).
+SNAPSHOT_SECTIONS = {"status": "Status at enrollment", "medications": "Medications", "history": "Clinical history"}
+SNAPSHOT_NO_DATA = "No data for this exists yet in the study dataset."
+EXTRAS_SEED = 7  # the synthetic generator's default seed; with the patient id it fixes each patient's rows
+
+
+def _yes(v) -> bool:
+    return _baseline_value(v) == "Yes"
+
+
+def synthetic_clinical_extras(pid: str, first: pd.Series, last_day: int) -> dict:
+    """Illustrative medications (0–4) and clinical events (0–4) for one synthetic patient, consistent with
+    their baseline fields. Seeded by patient id, so the same patient always gets the same rows. Never for study data."""
+    rng = np.random.default_rng([EXTRAS_SEED, zlib.crc32(pid.encode())])
+    decomp, ascites, he_meds, ohe = (_yes(first.get(c)) for c in ("decomp", "ascites", "he_meds", "anyOHE"))
+    varices = _yes(first.get("variceal_bleeding_history"))
+
+    def since() -> str:
+        return "before enrolment" if rng.random() < 0.7 else f"since study day {int(rng.integers(1, max(2, last_day)))}"
+
+    meds = []
+    if he_meds:
+        meds.append({"name": "Lactulose", "dose": "20 g", "freq": "2–3 times daily, to 2–3 soft stools", "since": since()})
+        if ohe or rng.random() < 0.5:
+            meds.append({"name": "Rifaximin", "dose": "550 mg", "freq": "twice daily", "since": since()})
+    if ascites:
+        meds.append({"name": "Spironolactone", "dose": "100 mg", "freq": "once daily", "since": since()})
+        if rng.random() < 0.7:
+            meds.append({"name": "Furosemide", "dose": "40 mg", "freq": "once daily", "since": since()})
+    if varices:
+        meds.append({"name": "Nadolol", "dose": "20 mg", "freq": "once daily", "since": since()})
+    elif decomp and rng.random() < 0.4:
+        meds.append({"name": "Carvedilol", "dose": "6.25 mg", "freq": "twice daily", "since": since()})
+    meds = meds[:4]
+
+    def day() -> int:
+        return int(rng.integers(1, max(2, last_day + 1)))
+
+    events = []
+    if rng.random() < 0.75:
+        d = day()
+        scan = "Liver MRI" if not decomp and rng.random() < 0.3 else "Liver ultrasound"
+        events.append({"day": d, "kind": "Imaging", "title": f"{scan}: HCC surveillance", "detail": "No focal lesion"})
+        if rng.random() < 0.8:
+            events.append({"day": min(last_day, d + int(rng.integers(0, 8))), "kind": "Labs",
+                           "title": "AFP checked: HCC surveillance", "detail": f"{rng.uniform(2.0, 8.0):.1f} ng/mL"})
+    if decomp and rng.random() < 0.5:
+        reason = ("Overt HE episode" if ohe else "Ascites: large-volume paracentesis" if ascites
+                  else "Upper GI bleed: endoscopy")
+        events.append({"day": day(), "kind": "Hospitalization", "title": reason,
+                       "detail": f"{int(rng.integers(2, 8))}-day stay"})
+    if decomp and rng.random() < 0.4:
+        events.append({"day": day(), "kind": "Labs", "title": "Liver panel and INR (MELD labs)", "detail": "Outpatient draw"})
+    events = sorted(events, key=lambda e: e["day"])[:4]
+    return {"medications": meds, "history": events}
+
+
+def snapshot_extras(pid: str, first: pd.Series, last_day: int, source: str) -> dict:
+    """Medications and Clinical history for the panel: generated rows on synthetic data, None (→ the no-data note)
+    on study data."""
+    if source != "synthetic":
+        return {"synthetic": False, "medications": None, "history": None}
+    return {"synthetic": True, **synthetic_clinical_extras(pid, first, last_day)}
 
 
 def clinical_snapshot(first: pd.Series, columns) -> list[dict]:
@@ -633,6 +700,7 @@ def patient_detail(pid: str) -> dict | None:
         "age": _baseline_value(first.get("age_yrs")),
         "ctp": _baseline_value(first.get("ctp_class")),
         "clinical": clinical_snapshot(first, g.columns),
+        "extras": snapshot_extras(pid, first, days[-1], source),
         "days": days,
         "valid": [bool(x) for x in is_valid],
         "valid_pct": int(round(100 * is_valid.mean())),

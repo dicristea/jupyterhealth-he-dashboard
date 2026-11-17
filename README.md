@@ -18,13 +18,24 @@ A clinician-facing dashboard for a hepatic encephalopathy (HE) study in which pa
 
 Inside the live demo you can also **export a notebook for any group of patients** (Cohort → Export → Download notebook, or Open in browser) and **simulate opening a patient from an EHR** (EHR launch tab → click a `JH-DEMO…` MRN).
 
+## Status (November 2026)
+
+| Piece | State |
+|---|---|
+| Patients, Cohort, exports, EHR launch | Working on synthetic and study data |
+| Clinical snapshot (patient page) | *Status at enrollment* works on both. *Medications* and *Clinical history* are illustrative synthetic rows in the demo; the study dataset has no such data yet |
+| Notebooks | Read-only pages, JupyterLite and Binder in the public demo (synthetic) |
+| Speech features | **Work in progress.** The extraction code is in the repo and viewable in the dashboard; no recordings are connected yet, so nothing is computed |
+| Study-team site | A separate password-protected deployment (`HE_HOSTED_STUDY=1`, [docs/hosting.md](docs/hosting.md#hosted-de-identified-site)) built from a private copy; its data never enters this repository |
+| Next | Event data (hospitalizations, labs over time) from the study team → clinical history on real data; speech recordings; cleaned sleep measures |
+
 ## What it does
 
 Each patient's ring produces a daily export. The dashboard turns it into views a clinician can read in a few minutes: who looks worse than usual this week, what one patient's rest and activity look like over time, and how groups of patients compare. It was designed with the study's clinician, a hepatologist at Weill Cornell Medicine, and shows only what the study data actually contains (no sleep stages, no labs, no event dates).
 
 | Tab | What you can do |
 |---|---|
-| **Patients** | Filter and sort the patient list (HE status, Child-Pugh, decompensation, age, MELD, data quality…). *Needs attention* flags patients whose last 7 days are worse than their own usual range. Click a patient for their profile: rest, regularity, HRV, heart rate, steps and SpO₂ against their own baseline, 24-hour activity patterns, and a clinical snapshot at enrolment (MELD, Child-Pugh, decompensation, HE, frailty, questionnaires) beside them. |
+| **Patients** | Filter and sort the patient list (HE status, Child-Pugh, decompensation, age, MELD, data quality…). *Needs attention* flags patients whose last 7 days are worse than their own usual range. Click a patient for their profile: rest, regularity, HRV, heart rate, steps and SpO₂ against their own baseline, 24-hour activity patterns, and a clinical snapshot beside them: status at enrollment (MELD, Child-Pugh, decompensation, HE, frailty, questionnaires), plus medications and clinical history (illustrative on synthetic data; the study file has neither yet). |
 | **Cohort** | Compare groups (e.g. decompensated vs. compensated) on any measure: weekly trajectories, one dot per patient, and a Mann-Whitney test. **Export** a PDF report or a ready-to-run notebook for the selected patients. |
 | **Notebooks** | The exploratory analyses behind the dashboard. In the demo: view them read-only, or run them in JupyterLite or on Binder. Locally: open them in your own JupyterLab. A **Speech features** card (work in progress, awaiting recordings) shows the speech code read-only; patient profiles have a matching Speech placeholder. |
 | **EHR launch** | A minimal SMART on FHIR launch: an EHR such as Medplum opens the dashboard on the patient in its chart, matched by MRN. *Simulate launch* tries it without an EHR. |
@@ -85,7 +96,7 @@ For an R `.rds` file in the study's format, install R with the `haven` package a
 | [docs/reference.md](docs/reference.md) | Architecture, data flow, routes, **how every measure is computed**, and every environment variable |
 | [docs/synthetic-data.md](docs/synthetic-data.md) | The data format, how each column is generated, the built-in relationships, how to change the settings, limitations |
 | [docs/medplum.md](docs/medplum.md) | Opening the dashboard from Medplum with SMART on FHIR, step by step |
-| [docs/hosting.md](docs/hosting.md) | Public demo mode, what it exposes, Docker build, pre-publication checklist |
+| [docs/hosting.md](docs/hosting.md) | Public demo mode, what it exposes, Docker build, pre-publication checklist, and the password-protected study-team site |
 | [docs/render-quickstart.md](docs/render-quickstart.md) | Deploying the demo to Render, click by click |
 | [docs/jupyterlite.md](docs/jupyterlite.md) | The in-browser notebook site on GitHub Pages: how it's built, size, limitations |
 
@@ -106,15 +117,16 @@ Demo mode always uses an in-memory synthetic cohort and refuses to start if poin
 python -m pytest -q
 ```
 
-59 tests, about 30 s. They always run on synthetic data and never need study data, R or a network (EHR calls are mocked). They cover the generator, the measures, every page and API route, exports, the SMART launch, Medplum seeding, demo mode, and both notebooks running end to end.
+93 tests, about 40 s. They always run on synthetic data and never need study data, R or a network (EHR calls are mocked). They cover the generator, the measures, every page and API route, exports, the SMART launch, Medplum seeding, demo mode, and both notebooks running end to end.
 
 ## Data-safety rules
 
 - **The study data never goes in this repo.** `.gitignore` blocks data files, `.ipynb` copies, images and PDFs as a backstop; still run `git status` before every commit.
-- **Local only, no login.** Outside demo mode the app binds to `127.0.0.1` and must never be deployed with study data.
+- **Local runs have no login.** Locally the app binds to `127.0.0.1`. The only way to host study data is the password-protected study-team mode (`HE_HOSTED_STUDY=1`), which refuses to start without a password and downloads the data from private storage at start-up.
 - Exported notebooks and PDF reports can contain data; don't commit them.
 - Never seed an EHR from study data or map real MRNs to study IDs before IRB approval and authentication.
-- A hosted copy may only run `HE_PUBLIC_DEMO=1` from this public repo ([checklist](docs/hosting.md)).
+- A hosted copy of this public repo may only run `HE_PUBLIC_DEMO=1` ([checklist](docs/hosting.md)).
+- **Voice recordings are identifiable:** they never go in the repo (`.gitignore` blocks audio files); only extracted measurements may be shared.
 
 ## Limitations
 
@@ -122,14 +134,15 @@ python -m pytest -q
 - **Baseline-only clinical data, no dates or events.** Group comparisons show baseline differences, not change after an event.
 - **Exploratory statistics:** unadjusted, no correction for multiple comparisons or confounding.
 - **Synthetic data** only encodes the generator's assumptions ([limitations](docs/synthetic-data.md#limitations)).
-- **No authentication;** the SMART launch is a proof of concept not yet tested end to end against a live EHR.
+- **One shared password, not per-user accounts,** on the study-team site; the SMART launch is a proof of concept not yet tested end to end against a live EHR.
 
 ## Roadmap
 
 1. Clinician-provided event table → before/after-event views.
 2. Clinicians prioritise the measures; trim the profile to match.
 3. Load data through **JupyterHealth Exchange** and launch from a production EHR via SMART on FHIR.
-4. Authentication before any deployment with real data.
+4. Speech recordings through the existing speech code, shown next to sleep and activity.
+5. Per-user authentication (institutional login) instead of one shared password.
 
 ## Credits and license
 

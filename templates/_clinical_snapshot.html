@@ -1,26 +1,71 @@
-{# Clinical snapshot side panel (data.CLINICAL_SNAPSHOT). Baseline values only; layout from the research workbench's care timeline. #}
+{# Clinical snapshot side panel: three dropdowns (data.SNAPSHOT_SECTIONS). Status = baseline fields (data.CLINICAL_SNAPSHOT);
+   Medications and Clinical history = generated rows on synthetic data, a no-data note on study data (data.snapshot_extras). #}
+{% set x = p.extras %}
 <aside class="clinical-panel" id="clinicalSnapshot" aria-labelledby="clinicalTitle">
     <div class="cp-header">
         <h2 id="clinicalTitle">Clinical snapshot</h2>
-        <span class="cp-when">At enrolment · study day 0</span>
     </div>
-    {% for g in p.clinical %}
-    <div class="cp-item">
-        <div class="cp-left"><div class="cp-dot{% if loop.first %} accent{% endif %}"></div><div class="cp-spine"></div></div>
-        <div class="cp-body">
-            <div class="cp-group">{{ g.group }} <span>at enrolment</span></div>
-            <div class="cp-grid">
-                {% for f in g.fields %}
-                <div class="cp-cell" title="{{ f.label }} at enrolment">
-                    <div class="cp-lbl">{{ f.label }}</div>
-                    <div class="cp-val{% if f.value is none %} missing{% endif %}">{{ f.value if f.value is not none else '—' }}</div>
+
+    <details class="cp-section" id="cpStatus" open>
+        <summary>{{ sections.status }} <span class="cp-sub">At enrolment · study day 0</span></summary>
+        <div class="cp-section-body">
+        {% for g in p.clinical %}
+        <div class="cp-item">
+            <div class="cp-left"><div class="cp-dot{% if loop.first %} accent{% endif %}"></div><div class="cp-spine"></div></div>
+            <div class="cp-body">
+                <div class="cp-group">{{ g.group }} <span>at enrolment</span></div>
+                <div class="cp-grid">
+                    {% for f in g.fields %}
+                    <div class="cp-cell" title="{{ f.label }} at enrolment">
+                        <div class="cp-lbl">{{ f.label }}</div>
+                        <div class="cp-val{% if f.value is none %} missing{% endif %}">{{ f.value if f.value is not none else '—' }}</div>
+                    </div>
+                    {% endfor %}
                 </div>
-                {% endfor %}
             </div>
         </div>
-    </div>
-    {% else %}
-    <p class="cp-empty">No clinical fields in this dataset.</p>
-    {% endfor %}
-    <p class="cp-foot">Labs, medications over time, imaging and hospitalizations will appear here when that data is added.</p>
+        {% else %}
+        <p class="cp-empty">No clinical fields in this dataset.</p>
+        {% endfor %}
+        </div>
+    </details>
+
+    <details class="cp-section" id="cpMedications">
+        <summary>{{ sections.medications }}{% if x.synthetic %} <span class="cp-tag">Synthetic</span>{% endif %}</summary>
+        <div class="cp-section-body">
+        {% if x.medications is none %}
+        <p class="cp-empty">{{ no_data_note }}</p>
+        {% else %}
+        {% for m in x.medications %}
+        <div class="cp-med">
+            <div class="cp-med-name">{{ m.name }} <span>{{ m.dose }}</span></div>
+            <div class="cp-lbl">{{ m.freq }} · {{ m.since }}</div>
+        </div>
+        {% else %}
+        <p class="cp-empty">No medications listed.</p>
+        {% endfor %}
+        {% endif %}
+        </div>
+    </details>
+
+    <details class="cp-section" id="cpHistory">
+        <summary>{{ sections.history }}{% if x.synthetic %} <span class="cp-tag">Synthetic</span>{% endif %}</summary>
+        <div class="cp-section-body">
+        {% if x.history is none %}
+        <p class="cp-empty">{{ no_data_note }}</p>
+        {% else %}
+        {% for e in x.history %}
+        <div class="cp-item">
+            <div class="cp-left"><div class="cp-dot{% if e.kind == 'Hospitalization' %} accent{% endif %}"></div><div class="cp-spine"></div></div>
+            <div class="cp-body">
+                <div class="cp-group">{{ e.title }} <span>study day {{ e.day }}</span></div>
+                <div class="cp-lbl">{{ e.kind }} · {{ e.detail }}</div>
+            </div>
+        </div>
+        {% else %}
+        <p class="cp-empty">No events in this period.</p>
+        {% endfor %}
+        {% endif %}
+        </div>
+    </details>
 </aside>

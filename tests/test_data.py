@@ -267,8 +267,46 @@ def test_patient_page_shows_clinical_snapshot():
     for group in data.CLINICAL_SNAPSHOT:
         assert f'<div class="cp-group">{group} ' in page
     assert "Ascites medication" not in page  # not in the synthetic data
-    assert "imaging and hospitalizations will appear here" in page
     assert "Baseline (at enrolment)" not in page  # the snapshot replaces the old baseline card
+
+
+def test_snapshot_has_three_dropdowns_with_synthetic_rows():
+    pid = data.patient_list()[0]["id"]
+    page = app.test_client().get(f"/patient/{pid}").data.decode()
+    for title in data.SNAPSHOT_SECTIONS.values():
+        assert f"<summary>{title}" in page
+    assert '<details class="cp-section" id="cpStatus" open>' in page
+    assert '<details class="cp-section" id="cpMedications">' in page and '<details class="cp-section" id="cpHistory">' in page
+    assert page.count('<span class="cp-tag">Synthetic</span>') == 2
+    assert data.SNAPSHOT_NO_DATA not in page and "Labs, medications over time" not in page
+
+
+def test_synthetic_extras_deterministic_and_consistent_with_baseline():
+    df, _ = data.load()
+    seen_he = False
+    for pid, g in df.groupby("name"):
+        first, last = g.iloc[0], int(g["days_since_start"].max())
+        a = data.synthetic_clinical_extras(pid, first, last)
+        assert a == data.synthetic_clinical_extras(pid, first, last)  # same patient → same rows
+        assert len(a["medications"]) <= 4 and len(a["history"]) <= 4
+        days = [e["day"] for e in a["history"]]
+        assert days == sorted(days) and all(1 <= d <= last for d in days)
+        names = {m["name"] for m in a["medications"]}
+        if first["he_meds"] == "Yes":
+            seen_he = True
+            assert names & {"Lactulose", "Rifaximin"}
+        else:
+            assert not names & {"Lactulose", "Rifaximin"}
+        if first["ascites"] == 1:
+            assert "Spironolactone" in names
+        if first["decomp"] == 0:
+            assert not any(e["kind"] == "Hospitalization" for e in a["history"])
+    assert seen_he  # the default cohort exercises the HE branch
+
+
+def test_snapshot_extras_never_generated_for_study_data():
+    row = pd.Series({"he_meds": "Yes", "ascites": 1.0, "decomp": 1.0})
+    assert data.snapshot_extras("010", row, 180, "study") == {"synthetic": False, "medications": None, "history": None}
 
 
 def test_synthetic_same_seed_same_output():

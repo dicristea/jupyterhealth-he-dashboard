@@ -175,6 +175,7 @@ def patient(pid):
         abort(404)
     ctx = session.get("ehr_context")
     return render_template("patient.html", active="patients", p=detail,
+                           sections=data.SNAPSHOT_SECTIONS, no_data_note=data.SNAPSHOT_NO_DATA,
                            ehr_context=ctx if ctx and ctx.get("patient") == pid else None)
 
 

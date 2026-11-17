@@ -111,6 +111,16 @@ def test_fails_closed_without_password_at_request_time(hosted, monkeypatch):
     assert app_module.app.test_client().get("/").status_code == 503
 
 
+def test_snapshot_on_study_data_shows_no_data_note_not_synthetic_rows(hosted):
+    pid = data.patient_list()[0]["id"]
+    assert data.load()[1] == "study"
+    page = _client().get(f"/patient/{pid}").data.decode()
+    for title in data.SNAPSHOT_SECTIONS.values():
+        assert f"<summary>{title}" in page
+    assert page.count(data.SNAPSHOT_NO_DATA) == 2  # Medications and Clinical history
+    assert "cp-tag" not in page and "cp-med" not in page and "Lactulose" not in page
+
+
 def test_pages_work_and_local_only_features_are_off(hosted):
     c = _client()
     pid = data.patient_list()[0]["id"]
