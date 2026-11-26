@@ -154,22 +154,22 @@ How it differs from the demo:
 
 ### 1. Put the data where the service can fetch it
 
-The app reads the converted cache (`<stem>.v2.csv`, made by `data._read_rds` the first time you run the app locally on the `.rds`), gzipped. It never needs R.
+The app reads the converted cache (`<stem>.v3.csv`, made by `data._read_rds` the first time you run the app locally on the `.rds`), gzipped. It never needs R.
 
 ```bash
 # from the folder that holds exploration_outputs/ (outside any repo)
-gzip -c "exploration_outputs/_cache/<stem>.v2.csv" > /tmp/study.v2.csv.gz
-gh release create data-2026-09-22 /tmp/study.v2.csv.gz --repo dicristea/jupyterhealth-he-dashboard-deid \
-  --title "Study data (de-identified, Sept 22 2026)" --notes "Release asset only. Never commit data."
-gh api repos/dicristea/jupyterhealth-he-dashboard-deid/releases/tags/data-2026-09-22 --jq '.assets[0].url'
-rm /tmp/study.v2.csv.gz
+gzip -c "exploration_outputs/_cache/<stem>.v3.csv" > /tmp/study.v3.csv.gz
+gh release create data-2026-11-17 /tmp/study.v3.csv.gz --repo dicristea/jupyterhealth-he-dashboard-deid \
+  --title "Study data (de-identified, Nov 17 2026)" --notes "Release asset only. Never commit data."
+gh api repos/dicristea/jupyterhealth-he-dashboard-deid/releases/tags/data-2026-11-17 --jq '.assets[0].url'
+rm /tmp/study.v3.csv.gz
 ```
 
 The last command prints the asset API URL (`https://api.github.com/repos/dicristea/jupyterhealth-he-dashboard-deid/releases/assets/<id>`): that is `HE_DATA_URL`. The release is private because the repo is. A release creates a git tag, but the file is not in the repository's history.
 
 Then make a token the service uses to download it: GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate: repository access *Only select repositories* → `jupyterhealth-he-dashboard-deid`; permissions **Contents: Read-only**, nothing else; expiry at the end of the semester. That is `HE_DATA_TOKEN`. The app sends it only to `api.github.com` (not to the storage host GitHub redirects to) and never logs it or the URL's query string.
 
-When the data changes (for example the cleaned sleep export), make a new release, update `HE_DATA_URL` and redeploy. Delete old releases you no longer need.
+When the data changes (a new export from the study team, or a new cache version), make a new release, update `HE_DATA_URL` and redeploy. Delete old releases you no longer need.
 
 ### 2. Create the Render service
 

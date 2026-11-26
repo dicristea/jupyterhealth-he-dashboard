@@ -2,7 +2,7 @@
 {% block title %}Patients · HE Dashboard{% endblock %}
 {% block content %}
 <h1>Patients</h1>
-<p class="sub">Set filters and click <strong>Apply filters</strong>. The summary, the list and "Open as cohort" all update together. Click a patient to open their profile. Values are medians across valid days (≥80% ring wear).</p>
+<p class="sub">Set filters and click <strong>Apply filters</strong>. The summary, the list and "Open as cohort" all update together. Click a patient to open their profile. Sleep values are medians over each patient's main nights; steps over valid days (≥80% ring wear).</p>
 
 <div class="strip {% if sel.ids is not none %}strip-filtered{% endif %}">
     {% if sel.ids is not none %}<span class="strip-label">Filtered cohort: <strong>{{ sel.label }}</strong></span>{% endif %}
@@ -12,8 +12,8 @@
     <span><strong>{{ "{:,}".format(summary.days) }}</strong> participant-days</span>
     <span>median <strong>{{ summary.median_days }}</strong> days each</span>
     <span><strong>{{ summary.valid_pct }}%</strong> valid days</span>
-    <span>night rest <strong>{{ summary.night_rest }} h</strong></span>
-    <span>regularity <strong>{{ summary.sri }}</strong></span>
+    <span>sleep midpoint <strong>{{ summary.sleep_mid or '—' }}</strong></span>
+    <span>total sleep <strong>{{ summary.sleep_tst if summary.sleep_tst is not none else '—' }} h</strong></span>
     {% endif %}
 </div>
 
@@ -39,7 +39,7 @@
         {% endfor %}
         <label>{{ filters.valid_pct.label }}<input type="number" name="valid_pct" min="0" max="100" value="{{ sel.params.valid_pct or '' }}" placeholder="e.g. 70"></label>
         <label class="check"><input type="checkbox" name="attention" value="1" {% if sel.params.attention %}checked{% endif %}>
-            <span>Needs attention<small>last 7 days worse than this patient's usual 10–90% range</small></span></label>
+            <span>Needs attention<small>sleep over the last 14 days worse than this patient's usual 10–90% range</small></span></label>
     </div>
     <div class="filter-actions">
         <button class="btn primary" type="submit">Apply filters</button>
@@ -53,16 +53,18 @@
 </form>
 
 <div class="card">
+    <div class="table-scroll">
     <table class="list" id="patients">
         <thead><tr>
             <th data-k="id">Patient</th><th data-k="sex">Sex</th><th data-k="age">Age</th>
             <th data-k="ctp">Child-Pugh</th><th data-k="meld">MELD</th><th data-k="he">HE</th>
-            <th data-k="night_rest">Night rest (h)</th><th data-k="sri">Regularity</th>
-            <th data-k="hrv">HRV</th><th data-k="steps">Steps</th>
-            <th data-k="valid_pct">Valid days</th><th data-k="attention">Flags</th><th>Night rest trend</th>
+            <th data-k="sleep_mid" title="Middle of the main night's sleep, median over all nights">Midpoint</th>
+            <th data-k="sleep_tst" title="Total sleep, hours">Sleep (h)</th><th data-k="sleep_eff" title="Sleep efficiency">Effic. (%)</th><th data-k="steps">Steps</th>
+            <th data-k="valid_pct">Valid days</th><th data-k="attention">Flags</th><th title="7-night average of the sleep midpoint; up = later">Midpoint trend</th>
         </tr></thead>
         <tbody></tbody>
     </table>
+    </div>
     <p class="hint" id="empty" hidden style="margin:14px 0 0">No patients match these filters. <a href="/">Clear filters</a>.</p>
 </div>
 
@@ -80,7 +82,7 @@
     function spark(values) {
         const v = values.filter(x => x !== null);
         if (v.length < 2) return '';
-        const lo = Math.min(...v), hi = Math.max(...v), W = 90, H = 22;
+        const lo = Math.min(...v), hi = Math.max(...v), W = 80, H = 22;
         let d = '', pen = false;
         values.forEach((y, i) => {
             if (y === null) { pen = false; return; }
@@ -102,10 +104,10 @@
                 <td class="id">${r.id}${SYNTHETIC ? '<span class="badge-synthetic sm">Synthetic</span>' : ''}</td>
                 <td>${dash(r.sex)}</td><td>${dash(r.age)}</td><td>${dash(r.ctp)}</td><td>${dash(r.meld)}</td>
                 <td>${r.he ? `<span class="pill ${r.he.toLowerCase()}">${r.he}</span>` : '—'}</td>
-                <td>${dash(r.night_rest)}</td><td>${dash(r.sri)}</td><td>${dash(r.hrv)}</td>
+                <td>${dash(r.sleep_mid_clock)}</td><td>${dash(r.sleep_tst)}</td><td>${dash(r.sleep_eff)}</td>
                 <td>${r.steps === null ? '—' : Math.round(r.steps).toLocaleString()}</td>
                 <td class="quality ${r.valid_pct < 70 ? 'low' : ''}">${r.valid_pct}% <span style="color:#94a3b8">of ${r.days}</span></td>
-                <td>${r.attention.length ? `<span class="pill flag" title="Last 7 days worse than usual: ${r.attention.join(', ')}">⚠ ${r.attention.join(', ')}</span>` : ''}</td>
+                <td class="flags">${r.attention.length ? `<span class="pill flag" title="Last 14 days' nights outside this patient's usual 10–90% range (not a clinical alert)">Sleep changed: ${r.attention.join('; ')}</span>` : ''}</td>
                 <td>${spark(r.spark)}</td>
             </tr>`).join('');
         document.getElementById('count').textContent = `${list.length} of ${rows.length} patients`;

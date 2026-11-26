@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK_DIR = ROOT / "notebooks"
 OUT_DIR = ROOT / "rendered_notebooks"
 # Same names as app.RENDERED_NOTEBOOKS (a test checks they match).
-NOTEBOOKS = ["deid_oura_data_exploration", "he_trajectories_phenotypes"]
+NOTEBOOKS = ["data_overview", "deid_oura_data_exploration", "he_trajectories_phenotypes"]
 # Not part of the demo: the speech notebook needs recordings, which are never public, and its Praat/librosa
 # stack isn't installed in the Docker builder stage.
 NOT_RENDERED = {"speech_features_starter"}

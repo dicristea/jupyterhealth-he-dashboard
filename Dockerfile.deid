@@ -22,7 +22,7 @@ FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=8000
 WORKDIR /app
 
-# Only what the web app imports. No R: the release asset is already the converted .v2.csv.gz cache.
+# Only what the web app imports. No R: the release asset is already the converted .v3.csv.gz cache.
 RUN pip install --no-cache-dir \
     flask==3.1.3 pandas==3.0.6 numpy==2.5.4 scipy==1.18.1 nbformat==5.11.1 gunicorn==27.0.0
 

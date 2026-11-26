@@ -1,5 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Patient {{ p.id }} · HE Dashboard{% endblock %}
+{% macro tile(t, i) %}
+<div class="mcard" data-key="{{ t.key }}" title="{{ t.help }}">
+    <div class="mcard-top">
+        <span class="mcard-label">{{ t.label }}</span>
+        <span class="pill-status {{ t.tone }}">{{ t.pill }}</span>
+    </div>
+    <div class="mcard-value">{{ t.last7 if t.last7 is not none else '—' }} <small>{{ t.unit }}{% if t.range %} (usual {{ t.range[0] }}–{{ t.range[1] }}){% endif %}</small></div>
+    <div class="mcard-spark" data-i="{{ i }}"></div>
+    <div class="mcard-foot">{{ t.why }}{% if t.trend %} · {{ t.trend }}{% endif %}</div>
+</div>
+{% endmacro %}
 {% block content %}
 {% if ehr_context %}
 <div class="ehr-banner">Opened from the EHR ({{ ehr_context.source }}) · MRN {{ ehr_context.mrn }} · {{ ehr_context.time }}
@@ -15,8 +26,7 @@
             {% else %}<span class="badge-deid">De-identified study participant</span>{% endif %}
         </div>
         <div class="pt-meta">
-            {% if p.age %}{{ p.age }} years{% endif %}{% if p.sex %} · {{ p.sex | lower }}{% endif %}
-            {% if p.ctp %} · {{ p.ctp }}{% endif %}
+            {% if p.headline %}<span title="At enrollment">{{ p.headline }}</span>{% endif %}
             {% if p.mrn %}<span style="margin-left:14px">MRN {{ p.mrn }}</span>{% endif %}
             <span style="margin-left:14px">{{ p.days | length }} study days</span>
         </div>
@@ -33,87 +43,73 @@
     {% endfor %}
 </div>
 
-<h2 class="section">Wearable measures</h2>
-<p class="sub" style="margin-bottom:12px">Last 7 valid days compared with this patient's own usual range (middle 50% of their days, shaded green). Click a card for the daily chart.</p>
+<div class="section-head">
+    <h2 class="section">Sleep and activity</h2>
+    <span class="info" id="statsInfo">
+        <button type="button" class="info-btn" aria-label="How these values are chosen" aria-expanded="false" aria-controls="statsInfoTip">i</button>
+        <span class="info-tip" id="statsInfoTip" role="tooltip">
+            <strong>How these values are chosen</strong>
+            <span>Main night: the night's long sleep record with 3–16 h in bed and 1–14 h asleep. Naps and short rest records are left out.</span>
+            <span>Sleep cards, HRV, heart rate and SpO₂ use main nights (Oura measures them overnight).</span>
+            <span>Steps and rest regularity use days with ≥80% ring wear.</span>
+            <span>Recent = median of the last {{ p.window }} study days (needs {{ p.min_recent }} nights; bedtime variability needs {{ p.bed_sd_min }}). Usual range = middle 50% of the nights before that, needing ≥{{ p.min_base }}.</span>
+            <span>A missing night is never counted as zero.</span>
+        </span>
+    </span>
+    <nav class="seg window-seg" aria-label="Recent window">
+        {% for w in p.windows %}<a href="?window={{ w }}" class="{% if w == p.window %}on{% endif %}"{% if w == p.window %} aria-current="true"{% endif %}>Last {{ w }} days</a>{% endfor %}
+    </nav>
+</div>
+<p class="sub" style="margin-bottom:12px">Each card's large value is the median of the last {{ p.window }} study days (bedtime variability: the spread of bedtimes over those days), compared with this patient's own usual range: the middle 50% of their earlier nights, shaded green. Not a normal range. Click a card for the night-by-night chart.</p>
 <div class="cards" id="tiles">
-    {% for t in p.tiles %}
-    {% set tone = 'neutral' %}
-    {% if t.status != 'typical' %}
-        {% if t.higher_is is none %}{% set tone = 'shift' %}
-        {% elif (t.status == 'below') == (t.higher_is == 'better') %}{% set tone = 'worse' %}
-        {% else %}{% set tone = 'better' %}{% endif %}
-    {% endif %}
-    <div class="mcard" data-key="{{ t.key }}" title="{{ t.help }}">
-        <div class="mcard-top">
-            <span class="mcard-label">{{ t.label }}</span>
-            <span class="pill-status {{ tone }}">{{ {'below': 'Below usual', 'above': 'Above usual', 'typical': 'Usual range'}[t.status] }}</span>
-        </div>
-        <div class="mcard-value">{{ t.last7 if t.last7 is not none else '—' }} <small>{{ t.unit }} (usual {{ t.range[0] }}–{{ t.range[1] }})</small></div>
-        <div class="mcard-spark" data-i="{{ loop.index0 }}"></div>
-        <div class="mcard-foot">{{ t.n_obs }} valid days · {{ t.trend }}</div>
-    </div>
-    {% endfor %}
+    {% for t in p.tiles %}{{ tile(t, loop.index0) }}{% endfor %}
     {% include "_speech_placeholder.html" %}
 </div>
+
+{% if p.more_tiles %}
+<details class="more-measures" id="moreMeasures">
+    <summary>More measures <span>HRV, heart rate, SpO₂ (main nights) · rest regularity (valid days)</span></summary>
+    <div class="cards">
+        {% for t in p.more_tiles %}{{ tile(t, p.tiles | length + loop.index0) }}{% endfor %}
+    </div>
+</details>
+{% endif %}
 
 <div class="card">
     <h2 id="chartTitle"></h2>
     <p class="hint" id="chartHelp"></p>
     <div id="chart"></div>
     <div class="legend">
-        <span><i style="background:#93c5fd"></i>daily value</span>
+        <span><i style="background:#93c5fd"></i><span id="legendValue">nightly value</span></span>
         <span><i style="background:#1d4ed8"></i>7-day average</span>
         <span><i style="background:#94a3b8"></i>personal median</span>
-        <span><i style="background:#e2e8f0;height:10px"></i>invalid day (&lt;80% wear)</span>
+        <span><i style="background:#e2e8f0;height:10px"></i><span id="legendShade">no main sleep record</span></span>
     </div>
 </div>
-
-<h2 class="section">Daily rhythm</h2>
-{% if p.profile %}
-<div class="two-col">
-    <div class="card">
-        <h2>24-hour activity profile</h2>
-        <p class="hint">All {{ p.profile.days }} valid days stacked on one 24-hour clock (04:00 → 04:00). Dark line = typical (median) activity intensity in MET. Darker blue band = middle 50% of days, lighter band = 80%. Purple shading = times this patient is usually resting.</p>
-        <div id="profile"></div>
-    </div>
-    <div class="card">
-        <h2>Time in activity classes</h2>
-        <p class="hint">Share of the day in each Oura activity class, averaged over valid days.</p>
-        <div id="tic"></div>
-        <div class="tic-legend" id="ticLegend"></div>
-    </div>
-</div>
-{% endif %}
 
 <div class="card">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
-        <h2 style="margin:0;flex:1">Activity explorer · MET intensity</h2>
-        <div class="seg" id="win">
-            <button data-n="1">1 day</button><button data-n="3" class="on">3 days</button><button data-n="7">7 days</button>
-        </div>
-        <button class="btn" id="prev">← Earlier</button>
-        <button class="btn" id="next">Later →</button>
-    </div>
-    <p class="hint">Every 5 minutes, how hard the body is working (MET: 1 = sitting at rest, 3 = light walking, 6+ = vigorous). The strip underneath is the Oura activity class. Long dark-blue runs are rest (including sleep). Grey days had low ring wear.</p>
-    <input type="range" id="dayRange" min="1" max="{{ p.days | length }}" value="1" style="width:100%" aria-label="Study day">
-    <div id="intraday"></div>
+    <h2>Sleep timing, last {{ p.nights | length }} nights</h2>
+    <p class="hint">One bar per night, from bedtime (top) to waking (bottom); the dot is the midpoint. Green band = this patient's usual midpoint (middle 50% of earlier nights). Lighter bars are shorter or daytime sleep records rather than a main night (shown at the bottom edge if they end after 16:00). Click a night to see its sleep stages.</p>
+    <div id="timing"></div>
     <div class="legend">
-        <span><i style="background:#93c5fd;height:10px"></i>&lt;1.5 MET (rest/sedentary)</span>
-        <span><i style="background:#fcd34d;height:10px"></i>1.5–3 light</span>
-        <span><i style="background:#fb923c;height:10px"></i>3–6 moderate</span>
-        <span><i style="background:#c2410c;height:10px"></i>6+ vigorous</span>
+        <span><i style="background:#3949ab;height:10px"></i>main night</span>
+        <span><i style="background:#c7d2fe;height:10px"></i>other sleep record (nap, rest)</span>
+        <span><i style="background:#f59e0b;height:8px;width:8px;border-radius:50%"></i>midpoint</span>
+        <span><i style="background:#dcfce7;height:10px"></i>usual midpoint</span>
+        <span><i style="background:#f1f5f9;height:10px"></i>no sleep record</span>
+    </div>
+    <div class="night-detail" id="nightDetail">
+        <div class="night-head" id="nightHead"></div>
+        <div id="hypnogram"></div>
+        <p class="hint" style="margin:4px 0 0">Stages use Oura's 5-minute coding (1 deep, 2 light, 3 REM, 4 awake), which matches Oura's nightly totals in this file; confirm with the study team before clinical use.</p>
     </div>
 </div>
 
-<div class="card">
-    <h2>Rest and activity, day by day</h2>
-    <p class="hint">Each row is one study day (day 1 at the top). Each column is 5 minutes, from 04:00 to 04:00 the next day. Steady, aligned dark-blue blocks mean regular rest.</p>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:#94a3b8;padding:0 2px">
-        <span>04:00</span><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>00:00</span><span>04:00</span>
-    </div>
-    <canvas class="actogram" id="actogram"></canvas>
-    <div class="legend" id="actLegend"></div>
-</div>
+<footer class="caveats">
+    <p>Sleep measures come from a consumer ring (Oura) and are not validated for diagnosing HE or sleep disorders. Use them to prompt a conversation, not to make decisions.</p>
+    <p>Comparisons are with this patient's own usual nights, not a normal range. A missing night means no sleep record, not poor sleep.</p>
+    <p>Clinical values are from enrollment only. This dataset has no dates of HE episodes, admissions, lab or medication changes, so a sleep change can't be linked to an event here. Times are clock times only; there are no calendar dates.</p>
+</footer>
 </div><!-- /.pt-main -->
 </div><!-- /.pt-layout -->
 
@@ -121,65 +117,71 @@
 (function () {
     'use strict';
     const P = {{ p | tojson }};
-    const clock = h => { const m = Math.round((18 + h) * 60) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
-    const NAMES = {'0': 'Ring off', '1': 'Rest', '2': 'Inactive', '3': 'Low', '4': 'Medium', '5': 'High'};
-    const COLORS = Object.values(Charts.ACT_COLORS);
+    const TILES = P.tiles.concat(P.more_tiles);
+    const clock = h => { const m = ((Math.round((18 + h) * 60) % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
 
     function show(key) {
         const meta = P.metrics[key], s = P.series[key];
         document.querySelectorAll('.mcard').forEach(t => t.classList.toggle('selected', t.dataset.key === key));
         document.getElementById('chartTitle').textContent = meta.label + (meta.unit && meta.unit !== 'clock' ? ` (${meta.unit})` : '');
         document.getElementById('chartHelp').textContent = meta.help;
+        document.getElementById('legendValue').textContent = s.noun === 'night' ? 'nightly value' : 'daily value';
+        document.getElementById('legendShade').textContent = s.noun === 'night' ? 'no main sleep record' : 'invalid day (<80% wear)';
         const vals = s.values.filter(v => v !== null).sort((a, b) => a - b);
         Charts.lineChart(document.getElementById('chart'), {
-            x: P.days, xLabel: 'study day', height: 240, shade: P.valid.map(v => !v),
+            x: P.days, xLabel: s.noun === 'night' ? 'study day (night ending that morning)' : 'study day', height: 240, shade: s.shade,
             series: [{y: s.values, color: '#93c5fd', dots: true, opacity: 0.8}, {y: s.rolling, color: '#1d4ed8', width: 2.5}],
             refLines: [{y: vals[Math.floor(vals.length / 2)], color: '#94a3b8'}],
             yFormat: meta.unit === 'clock' ? clock : (v => +v.toFixed(meta.unit === 'h' ? 1 : 0)),
         });
     }
 
+    const STAGES = {'1': 'deep', '2': 'light', '3': 'REM', '4': 'awake'};
+    function showNight(n) {
+        const head = document.getElementById('nightHead'), box = document.getElementById('hypnogram');
+        if (!n) { head.textContent = 'No night selected.'; box.innerHTML = ''; return; }
+        const mins = {};
+        for (const c of n.hyp) mins[c] = (mins[c] || 0) + 5;
+        const kind = n.main ? '' : ` · not a main night (record type: ${n.type.replace('_', ' ')})`;
+        const parts = [`<strong>Night ending study day ${n.day}</strong>${kind}`,
+                       `${clock(n.start)} → ${clock(n.end)}`];
+        if (n.tst !== null) parts.push(`total sleep ${n.tst} h`);
+        if (n.eff !== null) parts.push(`efficiency ${n.eff}%`);
+        if (n.waso !== null) parts.push(`awake after sleep onset ${n.waso} min`);
+        if (n.hyp) parts.push(Object.keys(STAGES).map(c => `${STAGES[c]} ${mins[c] || 0} min`).join(', '));
+        head.innerHTML = parts.join(' · ');
+        Charts.hypnogram(box, n);
+    }
+
     function drawStatic() {
         document.querySelectorAll('.mcard-spark').forEach(box => {
-            const t = P.tiles[+box.dataset.i];
+            const t = TILES[+box.dataset.i];
             Charts.sparkline(box, t.spark, t.band);
         });
-        if (P.profile && P.profile.met) Charts.percentileProfile(document.getElementById('profile'), P.profile);
-        if (P.time_in_class.length) {
-            Charts.stackedBar(document.getElementById('tic'), P.time_in_class, COLORS);
-            document.getElementById('ticLegend').innerHTML = P.time_in_class.map((c, i) =>
-                `<div><i style="background:${COLORS[i]}"></i>${c.label} · ${(c.share * 100).toFixed(1)}% · ${c.hours} h/day</div>`).join('');
-        }
+        Charts.sleepTiming(document.getElementById('timing'), P.nights, P.mid_band, showNight, selectedDay);
     }
 
-    // Activity explorer
-    let start = Math.max(1, P.days.length - 2), win = 3;
-    const range = document.getElementById('dayRange');
-    async function loadIntraday() {
-        range.value = start;
-        const res = await fetch(`/api/patient/${encodeURIComponent(P.id)}/intraday?start=${start}&days=${win}`);
-        const d = await res.json();
-        Charts.intradayChart(document.getElementById('intraday'), d.days);
-    }
-    document.querySelectorAll('#win button').forEach(b => b.addEventListener('click', () => {
-        document.querySelectorAll('#win button').forEach(x => x.classList.toggle('on', x === b));
-        win = +b.dataset.n; start = Math.min(start, Math.max(1, P.days.length - win + 1)); loadIntraday();
-    }));
-    document.getElementById('prev').addEventListener('click', () => { start = Math.max(1, start - win); loadIntraday(); });
-    document.getElementById('next').addEventListener('click', () => { start = Math.min(Math.max(1, P.days.length - win + 1), start + win); loadIntraday(); });
-    range.addEventListener('change', () => { start = Math.min(+range.value, Math.max(1, P.days.length - win + 1)); loadIntraday(); });
-
+    let selectedDay = null;
+    const latest = [...P.nights].reverse().find(n => n.main && n.hyp) || [...P.nights].reverse().find(n => n.type && n.hyp);
+    if (latest) selectedDay = latest.day;
     document.querySelectorAll('.mcard').forEach(t => t.addEventListener('click', () => show(t.dataset.key)));
     if (P.tiles.length) show(P.tiles[0].key);
     drawStatic();
-    loadIntraday();
-    Charts.actogram(document.getElementById('actogram'), P.actogram);
-    document.getElementById('actLegend').innerHTML = Object.keys(NAMES)
-        .map(k => `<span><i style="background:${Charts.ACT_COLORS[k]};height:10px"></i>${NAMES[k]}</span>`).join('');
+    showNight(latest);
+    document.getElementById('timing').addEventListener('nightselect', e => { selectedDay = e.detail.day; });
+    // Sparklines inside a closed <details> have no width until it opens
+    // "i" popover: hover or keyboard focus shows it (CSS); a click or tap pins it open, Escape or a click outside closes.
+    const info = document.getElementById('statsInfo'), infoBtn = info.querySelector('.info-btn');
+    const setInfo = open => { info.classList.toggle('open', open); infoBtn.setAttribute('aria-expanded', String(open)); };
+    infoBtn.addEventListener('click', e => { e.stopPropagation(); setInfo(!info.classList.contains('open')); });
+    document.addEventListener('click', e => { if (!info.contains(e.target)) setInfo(false); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { setInfo(false); } });
+    const more = document.getElementById('moreMeasures');
+    if (more) more.addEventListener('toggle', drawStatic);
     let resizeTimer;
     window.addEventListener('resize', () => {
         clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => { const sel = document.querySelector('.mcard.selected'); if (sel) show(sel.dataset.key); drawStatic(); loadIntraday(); }, 150);
+        resizeTimer = setTimeout(() => { const sel = document.querySelector('.mcard.selected'); if (sel) show(sel.dataset.key); drawStatic(); }, 150);
     });
 })();
 </script>

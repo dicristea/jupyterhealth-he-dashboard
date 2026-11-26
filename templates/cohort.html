@@ -32,49 +32,58 @@
     <span><strong>{{ summary.participants }}</strong> participants</span>
     {% for k, v in summary.sex.items() %}<span>{{ k }} <strong>{{ v }}</strong></span>{% endfor %}
     <span><strong>{{ summary.valid_pct }}%</strong> valid days</span>
-    <span>median night rest <strong>{{ summary.night_rest }} h</strong></span>
-    <span>median rest regularity <strong>{{ summary.sri }}</strong></span>
+    <span>median sleep midpoint <strong>{{ summary.sleep_mid or '—' }}</strong></span>
+    <span>median total sleep <strong>{{ summary.sleep_tst if summary.sleep_tst is not none else '—' }} h</strong></span>
 </div>
 
 <div class="controls">
     <label>Compare by
         <select class="control" id="group">
-            {% for k, v in summary.groups.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}
+            {% if '_selection' in summary.groups %}<option value="_selection">{{ summary.groups['_selection'] }}</option>{% endif %}
+            {% for name, opts in summary.group_menu.items() %}<optgroup label="{{ name }}">
+                {% for k, v in opts.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}
+            </optgroup>{% endfor %}
         </select>
     </label>
     <label>Measure
         <select class="control" id="metric">
-            {% for k, v in summary.metrics.items() %}<option value="{{ k }}">{{ v.label }}</option>{% endfor %}
+            {% for name, opts in summary.metric_menu.items() %}<optgroup label="{{ name }}">
+                {% for k, v in opts.items() %}<option value="{{ k }}"{% if k == summary.default_metric %} selected{% endif %}>{{ v }}</option>{% endfor %}
+            </optgroup>{% endfor %}
         </select>
     </label>
 </div>
+<p class="hint controls-note">Clinical groups are recorded once at enrollment, so this page shows baseline differences, never worsening. <span id="groupHint"></span></p>
 
 <div class="two-col">
     <div class="card">
         <h2>Over the study (median and middle 50%, per study week)</h2>
-        <p class="hint">Each person's week is averaged first. Weeks with fewer than 5 people in a group are hidden. Lines that stay apart mean a baseline difference, not a change over time.</p>
+        <p class="hint">Each person's week is averaged first (needs 3 values that week). Weeks with fewer than 5 people in a group are hidden. Later weeks include fewer people (dropout), so the tail is not a trend. Lines that stay apart mean a baseline difference, not a change over time. A night counts in the week of the morning it ended.</p>
         <div id="traj"></div>
         <div class="legend" id="trajLegend"></div>
+        <p class="excluded-note" id="excluded"></p>
     </div>
     <div class="card">
         <h2>One dot per patient</h2>
-        <p class="hint">Each patient's median across valid days.</p>
+        <p class="hint" id="stripHint">Each patient's median.</p>
         <div id="strip"></div>
         <div class="stat-line" id="stat"></div>
+        <p class="caveat-line">Exploratory: unadjusted for age, sex, beta-blockers, site or arm. With many group × measure pairs, about 1 in 20 comparisons reaches p &lt; 0.05 by chance.</p>
     </div>
 </div>
 {% endif %}
 
 <div class="card">
     <h2>About these measures</h2>
-    <p class="hint" style="margin:0">This file has no sleep stages and no clinical event dates. <strong>Night rest</strong>, <strong>rest regularity</strong> and <strong>rest midpoint</strong> are proxies built from Oura's 5-minute activity classes. Clinical labels were recorded once at enrolment. See the <a href="/notebooks">trajectories notebook</a> for the full method and where event data could come from.</p>
+    <p class="hint" style="margin:0"><strong>Sleep</strong> measures come from Oura's nightly sleep record and use only the <strong>main night</strong> (the long sleep record with 3–16 h in bed and 1–14 h asleep); <strong>heart rate, HRV and SpO₂</strong> are Oura's overnight values from the same main nights. Bedtime variability is each night's 2-week bedtime SD, so a patient's value is their typical 2-week bedtime SD. <strong>Steps</strong>, <strong>rest regularity</strong>, <strong>night rest</strong> and <strong>rest midpoint</strong> use days with ≥80% ring wear; the last three are estimates from Oura's 5-minute activity classes. A patient counts with at least 14 nights (or valid days) of a measure. Missing nights are never counted as zero. Clinical labels were recorded once at enrollment and there are no clinical event dates. See the <a href="/notebooks">trajectories notebook</a> for the full method.</p>
 </div>
 
 <script>
 (function () {
     'use strict';
     const SEL = {{ sel.params | tojson }};
-    const COLORS = ['#2563eb', '#d97706'];
+    const COLORS = ['#2563eb', '#d97706', '#059669', '#7c3aed'];
+    const HINTS = {{ summary.group_hints | tojson }};
     const clock = h => { const m = Math.round((18 + h) * 60) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
     const groupEl = document.getElementById('group'), metricEl = document.getElementById('metric');
     const qs = extra => new URLSearchParams({...SEL, ...extra}).toString();
@@ -83,6 +92,7 @@
         if (!groupEl) return;
         const res = await fetch('/api/cohort?' + qs({group: groupEl.value, metric: metricEl.value}));
         const d = await res.json();
+        document.getElementById('groupHint').textContent = HINTS[groupEl.value] || '';
         const fmt = d.metric.unit === 'clock' ? clock : (v => +v.toFixed(d.metric.digits === 0 ? 0 : 1));
         const weeks = [...new Set(d.levels.flatMap(l => l.weeks))].sort((a, b) => a - b);
         const align = (l, key) => weeks.map(w => { const i = l.weeks.indexOf(w); return i < 0 ? null : l[key][i]; });
@@ -91,17 +101,20 @@
             series: d.levels.map((l, i) => ({y: align(l, 'median'), color: COLORS[i], width: 2.5})),
             bands: d.levels.map((l, i) => ({lo: align(l, 'q1'), hi: align(l, 'q3'), color: COLORS[i]})),
         });
+        const num = v => v.toLocaleString('en-US');
         document.getElementById('trajLegend').innerHTML = d.levels
-            .map((l, i) => `<span><i style="background:${COLORS[i]}"></i>${l.name} (n=${l.n})</span>`).join('');
+            .map((l, i) => `<span><i style="background:${COLORS[i]}"></i>${l.name}: ${num(l.n)} people · ${num(l.nights)} ${d.noun}</span>`).join('');
+        document.getElementById('excluded').textContent = d.excluded
+            ? `${d.excluded} ${d.excluded === 1 ? 'person' : 'people'} left out (fewer than ${d.min_person} ${d.noun})` : '';
+        document.getElementById('stripHint').textContent = `Each patient's median over their ${d.basis}.`;
         Charts.stripChart(document.getElementById('strip'),
             d.levels.map((l, i) => ({name: l.name, color: COLORS[i], values: l.people})), {height: 260, yFormat: fmt});
         const unit = d.metric.unit === 'clock' ? '' : ' ' + d.metric.unit;
         let txt = d.levels.map(l => `${l.name}: median <strong>${l.overall_median === null ? '—' : fmt(l.overall_median) + unit}</strong>`).join(' · ');
-        if (d.p_value !== undefined) {
-            txt += `<br>Mann-Whitney p = <strong>${d.p_value}</strong>, effect size r = ${d.effect_r} `
-                + (d.p_value < 0.05 ? '(a difference worth a closer look)' : '(no clear difference)');
-        } else {
-            txt += '<br><span style="color:#94a3b8">Too few patients in one group for a test.</span>';
+        txt += `<br><strong>${d.direction}</strong>`;
+        if (d.p_text) txt += ` · ${d.test} ${d.p_text}`;
+        if (d.untested_levels.length && d.p_text) {
+            txt += `<br><span class="muted-note">Not tested (fewer than ${d.min_test} people): ${d.untested_levels.join(', ')}.</span>`;
         }
         document.getElementById('stat').innerHTML = txt;
     }
@@ -143,6 +156,11 @@
     });
 
     if (groupEl) {
+        // ?group= and ?metric= preselect the menus (links and screenshots); unknown values are ignored.
+        const url = new URLSearchParams(location.search);
+        [[groupEl, 'group'], [metricEl, 'metric']].forEach(([el, k]) => {
+            if ([...el.options].some(o => o.value === url.get(k))) el.value = url.get(k);
+        });
         [groupEl, metricEl].forEach(el => el.addEventListener('change', draw));
         window.addEventListener('resize', draw);
         draw();

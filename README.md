@@ -11,8 +11,8 @@ A clinician-facing dashboard for a hepatic encephalopathy (HE) study in which pa
 | Link | What it is |
 |---|---|
 | **[Live demo](https://he-dashboard-synthetic-demo.onrender.com)** | The dashboard itself: Patients, Cohort, Notebooks and EHR launch tabs. Free host: the first visit after a quiet period can take up to a minute to wake up. |
-| **Read-only notebooks**: [exploration](https://he-dashboard-synthetic-demo.onrender.com/notebooks/view/deid_oura_data_exploration) · [trajectories & phenotypes](https://he-dashboard-synthetic-demo.onrender.com/notebooks/view/he_trajectories_phenotypes) | The two analysis notebooks, already run on synthetic data. Nothing to install or wait for. |
-| **Run in your browser** (JupyterLite): [exploration](https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html?path=notebooks/deid_oura_data_exploration.ipynb) · [trajectories & phenotypes](https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html?path=notebooks/he_trajectories_phenotypes.ipynb) | A full JupyterLab with the notebooks, running entirely in your browser. Edit and re-run anything. Then use **Run → Run All Cells**. First load takes 30–60 s; best on a laptop (Chrome, Firefox or Safari). |
+| **Read-only notebooks**: [data overview](https://he-dashboard-synthetic-demo.onrender.com/notebooks/view/data_overview) · [exploration](https://he-dashboard-synthetic-demo.onrender.com/notebooks/view/deid_oura_data_exploration) · [trajectories & phenotypes](https://he-dashboard-synthetic-demo.onrender.com/notebooks/view/he_trajectories_phenotypes) | The three analysis notebooks, already run on synthetic data. Nothing to install or wait for. |
+| **Run in your browser** (JupyterLite): [data overview](https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html?path=notebooks/data_overview.ipynb) · [exploration](https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html?path=notebooks/deid_oura_data_exploration.ipynb) · [trajectories & phenotypes](https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html?path=notebooks/he_trajectories_phenotypes.ipynb) | A full JupyterLab with the notebooks, running entirely in your browser. Edit and re-run anything. Then use **Run → Run All Cells**. First load takes 30–60 s; best on a laptop (Chrome, Firefox or Safari). |
 | **Run on Binder**: [open JupyterLab](https://mybinder.org/v2/gh/dicristea/jupyterhealth-he-dashboard/main?urlpath=lab/tree/notebooks) | The same notebooks on a free cloud server, with full Python. Can take a few minutes to start. |
 | **Code**: [this repository](https://github.com/dicristea/jupyterhealth-he-dashboard) | Run it on your own computer with the [quickstart](#quickstart) below. |
 
@@ -22,21 +22,21 @@ Inside the live demo you can also **export a notebook for any group of patients*
 
 | Piece | State |
 |---|---|
-| Patients, Cohort, exports, EHR launch | Working on synthetic and study data |
-| Clinical snapshot (patient page) | *Status at enrollment* works on both. *Medications* and *Clinical history* are illustrative synthetic rows in the demo; the study dataset has no such data yet |
+| Patients, Cohort, exports, EHR launch | Working on synthetic and study data. The Cohort tab is core to the study and will be expanded next semester |
+| Clinical snapshot (patient page) | *At enrollment* (labs, Child-Pugh, ascites, HE, beta-blocker) works on both. *Medications* and *Clinical history* are illustrative synthetic rows in the demo; the study dataset has no such data yet |
 | Notebooks | Read-only pages, JupyterLite and Binder in the public demo (synthetic) |
-| Speech features | **Work in progress.** The extraction code is in the repo and viewable in the dashboard; no recordings are connected yet, so nothing is computed |
+| Speech features | **Work in progress, core to the study** (expanded next semester). The extraction code is in the repo and viewable in the dashboard; no recordings are connected yet, so nothing is computed |
 | Study-team site | A separate password-protected deployment (`HE_HOSTED_STUDY=1`, [docs/hosting.md](docs/hosting.md#hosted-de-identified-site)) built from a private copy; its data never enters this repository |
-| Next | Event data (hospitalizations, labs over time) from the study team → clinical history on real data; speech recordings; cleaned sleep measures |
+| Next | Event data (hospitalizations, labs over time) from the study team → clinical history on real data; speech recordings; confirm the hypnogram stage codes with the study team |
 
 ## What it does
 
-Each patient's ring produces a daily export. The dashboard turns it into views a clinician can read in a few minutes: who looks worse than usual this week, what one patient's rest and activity look like over time, and how groups of patients compare. It was designed with the study's clinician, a hepatologist at Weill Cornell Medicine, and shows only what the study data actually contains (no sleep stages, no labs, no event dates).
+Each patient's ring produces a daily export. The dashboard turns it into views a clinician can read in a few minutes: who looks worse than usual this week, what one patient's sleep and activity look like over time, and how groups of patients compare. It was designed with the study's clinician, a hepatologist at Weill Cornell Medicine, and shows only what the study data actually contains (Oura nightly sleep with stages; clinical values recorded once at enrollment; no event dates or repeated labs).
 
 | Tab | What you can do |
 |---|---|
-| **Patients** | Filter and sort the patient list (HE status, Child-Pugh, decompensation, age, MELD, data quality…). *Needs attention* flags patients whose last 7 days are worse than their own usual range. Click a patient for their profile: rest, regularity, HRV, heart rate, steps and SpO₂ against their own baseline, 24-hour activity patterns, and a clinical snapshot beside them: status at enrollment (MELD, Child-Pugh, decompensation, HE, frailty, questionnaires), plus medications and clinical history (illustrative on synthetic data; the study file has neither yet). |
-| **Cohort** | Compare groups (e.g. decompensated vs. compensated) on any measure: weekly trajectories, one dot per patient, and a Mann-Whitney test. **Export** a PDF report or a ready-to-run notebook for the selected patients. |
+| **Patients** | Filter and sort the patient list (HE status, Child-Pugh, decompensation, age, MELD, data quality…). *Needs attention* flags patients whose sleep over the last 14 days is worse than their own usual range. Click a patient for their profile: Oura sleep (midpoint, total sleep, efficiency, awake after sleep onset, bedtime variability) and steps against their own usual range (last 7 or 14 days, with an "i" note on how it's computed), a night-by-night sleep timing chart with each night's sleep stages, more measures (HRV, heart rate, SpO₂, regularity) on request, and a clinical snapshot at enrollment (liver severity and labs, decompensation, HE, beta-blocker), plus illustrative medications and clinical history on synthetic data only. |
+| **Cohort** | Compare groups recorded at enrollment (HE, Child-Pugh A/B/C, MELD band, ascites, decompensation, beta-blocker, sex, etiology) on sleep, activity and physiology measures: weekly trajectories, one dot per patient, and a Mann-Whitney or Kruskal-Wallis test with a plain-language result. **Export** a PDF report or a ready-to-run notebook for the selected patients. |
 | **Notebooks** | The exploratory analyses behind the dashboard. In the demo: view them read-only, or run them in JupyterLite or on Binder. Locally: open them in your own JupyterLab. A **Speech features** card (work in progress, awaiting recordings) shows the speech code read-only; patient profiles have a matching Speech placeholder. |
 | **EHR launch** | A minimal SMART on FHIR launch: an EHR such as Medplum opens the dashboard on the patient in its chart, matched by MRN. *Simulate launch* tries it without an EHR. |
 
@@ -64,7 +64,8 @@ Open <http://127.0.0.1:5050>. You should see 24 synthetic patients and an amber 
 
 | Notebook | What it does |
 |---|---|
-| `notebooks/deid_oura_data_exploration.py` | A beginner-friendly tour of the dataset: who is in it, how complete it is, the sleep proxies, and what exists compared with the research workbench. |
+| `notebooks/data_overview.py` | A plain-language inventory of the newest data file: people and days, what every column means (with units), how complete it is, what it doesn't contain. Aggregates only, no rows. |
+| `notebooks/deid_oura_data_exploration.py` | A beginner-friendly tour of the dataset: who is in it, how complete it is, Oura sleep (per-night measures, stages, timing, group comparisons), and the activity views (actogram, 24-h profile, MET). |
 | `notebooks/he_trajectories_phenotypes.py` | Group trajectories over the study, individual phenotypes (clustering), and why before/after-event analysis needs an event table. |
 | `notebooks/speech_features_starter.py` | Acoustic features (pitch, jitter, shimmer, HNR, formants, pauses, MFCCs) from voice recordings, one row per recording. Feature extraction only, not a clinical model. Needs `pip install -r requirements-speech.txt` and your own recordings in `HE_SPEECH_DIR` (none ship with the repo; voices are identifiable, so keep them out of it). Doesn't run in the online demo or JupyterLite; the dashboard shows its code read-only at `/notebooks/code/speech_features_starter`. |
 
@@ -75,7 +76,7 @@ jupytext --to ipynb notebooks/*.py      # make runnable copies
 HE_DATA_SOURCE=synthetic jupyter lab    # start from the repo folder
 ```
 
-`HE_DATA_SOURCE` works as in the app: `synthetic` uses generated data, `study` needs the study file and R, `auto` (default) uses the study file if it finds one and synthetic data otherwise. On synthetic data, sections that need columns the generator doesn't produce (temperature, sleep stages) say so and skip. After editing, write changes back with `jupytext --to py:percent notebooks/<name>.ipynb` and commit only the `.py`.
+`HE_DATA_SOURCE` works as in the app: `synthetic` uses generated data, `study` needs the study file and R, `auto` (default) uses the study file if it finds one and synthetic data otherwise. On synthetic data, sections that need columns the generator doesn't produce (e.g. temperature) say so and skip. After editing, write changes back with `jupytext --to py:percent notebooks/<name>.ipynb` and commit only the `.py`.
 
 ## Using your own data
 
@@ -117,7 +118,7 @@ Demo mode always uses an in-memory synthetic cohort and refuses to start if poin
 python -m pytest -q
 ```
 
-93 tests, about 40 s. They always run on synthetic data and never need study data, R or a network (EHR calls are mocked). They cover the generator, the measures, every page and API route, exports, the SMART launch, Medplum seeding, demo mode, and both notebooks running end to end.
+128 tests, about a minute and a half. They always run on synthetic data and never need study data, R or a network (EHR calls are mocked). They cover the generator, the measures, every page and API route, exports, the SMART launch, Medplum seeding, demo mode, and the three data notebooks running end to end.
 
 ## Data-safety rules
 
@@ -130,7 +131,7 @@ python -m pytest -q
 
 ## Limitations
 
-- **Proxies, not sleep.** Night rest, rest midpoint and regularity come from Oura's activity classes, not sleep staging, and haven't been validated against polysomnography.
+- **Consumer-ring sleep.** Sleep measures come from Oura's own sleep record (stage codes still to be confirmed with the study team), not polysomnography. The Cohort tab's night rest, rest midpoint and regularity are older proxies from Oura's activity classes.
 - **Baseline-only clinical data, no dates or events.** Group comparisons show baseline differences, not change after an event.
 - **Exploratory statistics:** unadjusted, no correction for multiple comparisons or confounding.
 - **Synthetic data** only encodes the generator's assumptions ([limitations](docs/synthetic-data.md#limitations)).

@@ -38,7 +38,7 @@ What success looks like:
 - `/healthz` shows `ok`.
 - Every page has the amber "Public demo. Every patient here is synthetic" banner; the nav reads "Public demo · synthetic data only".
 - Patients tab: 24 patients, `DEMO-01` … `DEMO-24`.
-- A profile (`/patient/DEMO-01`) shows tiles, trend charts and the activity explorer.
+- A profile (`/patient/DEMO-01`) shows sleep tiles, the sleep timing chart and the clinical snapshot.
 - Cohort tab draws the comparison charts; **Export → PDF report** opens a printable page. There's no "New notebook" button.
 - Notebooks tab says "Not available in the public demo".
 - EHR tab: clicking a `JH-DEMOxx` button opens that patient with the "Opened from the EHR" banner.

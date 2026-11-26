@@ -1,4 +1,4 @@
-"""The analysis notebooks run end to end on synthetic data (no R, no study file). About 15 s together.
+"""The analysis notebooks (and the data overview) run end to end on synthetic data (no R, no study file). About 15 s together.
 The speech notebook runs with no recordings, and its feature functions work on an in-memory tone."""
 from pathlib import Path
 
@@ -22,6 +22,26 @@ def test_notebook_runs_on_synthetic_data(name, monkeypatch):
     monkeypatch.setenv("HE_DATA_SOURCE", "synthetic")
     text = _execute(name)
     assert "Data source: synthetic" in text and "SYNTHETIC DATA" in text
+    assert "Main nights:" in text  # the Oura sleep-record measures ran
+
+
+def test_data_overview_runs_on_synthetic_data(monkeypatch):
+    monkeypatch.setenv("HE_DATA_SOURCE", "synthetic")
+    text = _execute("data_overview")
+    assert "Data source: synthetic" in text and "SYNTHETIC DATA" in text and "Main nights:" in text
+    src = "\n".join(c.source for c in jupytext.read(NOTEBOOKS / "data_overview.py").cells if c.cell_type == "code")
+    for raw_rows in (".head(", ".sample(", ".tail("):  # run on study data by researchers: aggregates only
+        assert raw_rows not in src, raw_rows
+
+
+@pytest.mark.parametrize("name", ["deid_oura_data_exploration", "he_trajectories_phenotypes", "data_overview"])
+def test_notebooks_open_the_study_file_only_through_data_py(name):
+    # data.py's R step is the one place calendar dates are reduced to clock times; a notebook with its own
+    # conversion could write a dated cache.
+    src = "\n".join(c.source for c in jupytext.read(NOTEBOOKS / f"{name}.py").cells if c.cell_type == "code")
+    assert "_read_rds(" in src
+    for own_loader in ("readRDS", "Rscript", "R_TO_CSV", "pyreadr", "write.csv"):
+        assert own_loader not in src, own_loader
 
 
 def _have_speech_stack() -> bool:

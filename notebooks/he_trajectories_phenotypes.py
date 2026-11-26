@@ -13,8 +13,9 @@
 #
 # **What this notebook is for:** the original goal was to plot Oura measures
 # **before and after clinical events** (for example decompensation). This
-# notebook explains why that isn't possible with the current file yet, then
-# does the two analyses we *can* do now:
+# notebook explains why that still isn't possible (the Nov 2026 file added
+# real sleep, but still no event dates), then does the two analyses we *can*
+# do now:
 #
 # 1. **Trajectories (population level).** How do groups of patients (for
 #    example decompensated vs. compensated) look across their 180 study days?
@@ -22,8 +23,9 @@
 #    recognisable "types" based on their own Oura patterns, and do those types
 #    line up with their clinical labels?
 #
-# It builds on `deid_oura_data_exploration`: same data file, same cleaning,
-# same **night rest bout** sleep proxy.
+# It builds on `deid_oura_data_exploration`: same data file, same loader,
+# the same **main-night** sleep measures (its Step 20) and the activity-based
+# **night rest bout** proxy for files without a sleep record.
 #
 # > 🔒 **Privacy:** the data stays on this computer. No participant IDs are
 # > shown in charts. **Never commit an `.ipynb` with outputs.** Only this blank
@@ -67,11 +69,13 @@ print("Data source:", DATA_SOURCE + (" (from the study site)" if HOSTED_LITE els
 if SYNTHETIC:
     print("⚠️  SYNTHETIC DATA. Every result below is an artefact of the generator settings "
           "(docs/synthetic-data.md), not a clinical finding.")
-if SYNTHETIC or HOSTED_LITE:
-    # The repo folder (it holds the dashboard's data.py), whether Jupyter started in notebooks/ or the repo
-    REPO = next((p for p in (Path.cwd(), *Path.cwd().parents) if (p / "data.py").exists()), None)
-    if REPO is None:
-        raise FileNotFoundError("Can't find the dashboard's data.py: run this notebook from the repo or its notebooks/ folder.")
+# The repo folder (it holds the dashboard's data.py), whether Jupyter started in notebooks/ or the repo.
+# data.py is the only code that opens the study .rds: its R step keeps clock times only (no calendar dates).
+REPO = next((p for p in (Path.cwd(), *Path.cwd().parents) if (p / "data.py").exists()), None)
+if REPO is None:
+    raise FileNotFoundError("Can't find the dashboard's data.py: run this notebook from the repo or its notebooks/ folder.")
+sys.path.insert(0, str(REPO))
+import data as he_data
 
 # %% [markdown]
 # ## Part 1 · Why "before and after clinical events" isn't possible yet
@@ -85,10 +89,10 @@ if SYNTHETIC or HOSTED_LITE:
 #
 # | Need | In the file? |
 # |---|---|
-# | Event **dates** (decompensation, HE episode, hospitalisation, med change) | ❌ No. `decomp`, `anyhe`, `anyOHE`, `ascites`, `he_meds`… are **one value per person**, measured at enrolment and copied onto every day. The check below confirms none of them ever changes within a person. |
-# | A real calendar | ❌ No. Only `days_since_start` (study day 1–180). We don't know what day 1 is (enrolment? ring activation?). |
-# | Sleep data (stages, total sleep, bedtime) | ❌ No. Only the 5-minute **activity** string, which we turn into a sleep *proxy*. Sleep regularity is a promising signal in cirrhosis, so this gap matters. |
-# | Repeated labs (MELD, ammonia, sodium over time) | ❌ No. MELD and Child-Pugh are baseline only. |
+# | Event **dates** (decompensation, HE episode, hospitalisation, med change) | ❌ No. `decomp`, `anyhe`, `anyOHE`, `ascites`, `he_meds`… are **one value per person**, measured at enrollment and copied onto every day. The check below confirms none of them ever changes within a person. |
+# | A real calendar | ❌ No, by design (HIPAA Safe Harbor). Only `days_since_start` (study day 0–180). We don't know what day 0 is (enrollment? ring activation?). |
+# | Sleep data (stages, total sleep, bedtime) | ✅ Yes, since the Nov 2026 file: one Oura sleep record per night (total sleep, awake time, latency, REM, the 5-minute hypnogram, and bedtime/wake as **clock times only**). Used below. Older files only had the activity string, turned into a sleep *proxy*. |
+# | Repeated labs (MELD, bilirubin, albumin, INR over time) | ❌ No. Labs, MELD and Child-Pugh are at enrollment only. |
 # | Resting HR, temperature deviation | ❌ No. Only daily *average* HR. |
 #
 # **Where event data could come from:**
@@ -102,10 +106,10 @@ if SYNTHETIC or HOSTED_LITE:
 #    chart only needs the **MRN** to match wearable data held outside the EHR
 #    (for example in JupyterHealth Exchange). This needs the appropriate
 #    ethics approval and authentication.
-# 3. **More complete Oura data.** A full Oura export has nightly **sleep
-#    periods** with bedtime start/end, the 5-minute sleep-stage string,
-#    temperature deviation and lowest HR, plus raw HR/HRV files. Oura
-#    timestamps are in UTC and must be converted to local time. The Oura API
+# 3. **More complete Oura data.** The Nov 2026 file has the nightly sleep
+#    record; a full Oura export would add temperature deviation, lowest HR,
+#    raw HR/HRV files and every sleep period of the day (the file keeps one
+#    per day, so daytime naps are missing). The Oura API
 #    could also feed JupyterHealth Exchange directly, once minute-level and
 #    daily heart-rate values are tagged apart (Open mHealth qualifiers).
 #
@@ -117,9 +121,11 @@ if SYNTHETIC or HOSTED_LITE:
 # %% [markdown]
 # ## Part 2 · Load and prepare the data
 #
-# Same loader as the exploration notebook: R converts the `.rds` file to a CSV
-# once (cached outside the repo), then pandas reads it. By default it uses the
-# single `.rds` file in `../../de-identified data/`; set **`JH_DATA_FILE`** if
+# Same loader as the dashboard and the exploration notebook (`data.py`): R
+# converts the `.rds` file to a CSV once (cached outside the repo as
+# `*.v3.csv`), keeping bedtimes as **clock times only** and refusing to write
+# any calendar date. By default it uses the single `.rds` file in
+# `../../de-identified data/`; set **`JH_DATA_FILE`** (or `HE_DATA_FILE`) if
 # your copy lives somewhere else.
 #
 # On synthetic data the table comes from the dashboard's `data.py` instead
@@ -128,10 +134,6 @@ if SYNTHETIC or HOSTED_LITE:
 # repo, which git ignores.
 
 # %%
-import re
-import subprocess
-import sys
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -144,55 +146,39 @@ from sklearn.preprocessing import StandardScaler
 pd.set_option("display.width", 160)
 plt.rcParams.update({"figure.dpi": 110, "axes.spines.top": False, "axes.spines.right": False})
 
-def default_data_file(folder: Path = Path("../../de-identified data")) -> Path:
-    """The single .rds file in the data folder; set JH_DATA_FILE to choose one explicitly."""
-    found = sorted(folder.glob("*.rds"))
-    if len(found) != 1:
-        raise FileNotFoundError(f"Expected exactly one .rds file in {folder.resolve()}, found {len(found)}. "
-                                "Set JH_DATA_FILE to the study file.")
-    return found[0]
+def fmt_p(p: float) -> str:
+    """p-values for reading: never "p = 0"."""
+    if p is None or pd.isna(p):
+        return "n/a"
+    return "< 0.001" if p < 0.001 else f"{p:.3f}" if p < 0.01 else f"{p:.2f}"
 
 
 if SYNTHETIC or HOSTED_LITE:
-    sys.path.insert(0, str(REPO))  # the dashboard's data.py
-    import data
     OUTPUT_DIR = REPO / "notebook_outputs"   # git-ignored, inside the repo (in JupyterLite: this browser only)
     OUTPUT_DIR.mkdir(exist_ok=True)
 else:
-    DATA_FILE = Path(os.environ.get("JH_DATA_FILE") or default_data_file()).expanduser().resolve()
-    CACHE_DIR = DATA_FILE.parent.parent / "exploration_outputs" / "_cache"   # outside the repo
-    OUTPUT_DIR = CACHE_DIR.parent
-    print("Data file:", DATA_FILE, "| exists:", DATA_FILE.exists())
-
-R_TO_CSV = r"""
-args <- commandArgs(trailingOnly = TRUE)
-x <- readRDS(args[1])
-x <- x[, !vapply(x, is.list, logical(1)), drop = FALSE]
-x[] <- lapply(x, function(v) if (inherits(v, "haven_labelled")) haven::as_factor(v) else v)
-write.csv(x, args[2], row.names = FALSE, na = "")
-"""
-
-
-def load_rds(path: Path) -> pd.DataFrame:
-    cache = CACHE_DIR / (path.stem + ".csv")
-    if not cache.exists() or cache.stat().st_mtime < path.stat().st_mtime:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        script = CACHE_DIR / "rds_to_csv.R"
-        script.write_text(R_TO_CSV)
-        subprocess.run(["Rscript", str(script), str(path), str(cache)], check=True)
-    return pd.read_csv(cache, low_memory=False, dtype={"class_5_min": str, "name": str})
-
+    if os.environ.get("JH_DATA_FILE"):
+        DATA_FILE = Path(os.environ["JH_DATA_FILE"])
+    else:  # HE_DATA_FILE, or the single .rds in ../de-identified data/ (data.py raises if there are none or several)
+        DATA_FILE = he_data.DATA_FILE or he_data.default_data_file()
+    DATA_FILE = DATA_FILE.expanduser().resolve()
+    OUTPUT_DIR = DATA_FILE.parent.parent / "exploration_outputs"   # outside the repo
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print("Data file:", DATA_FILE.name, "| exists:", DATA_FILE.exists())
 
 if SYNTHETIC:
-    raw, origin = data.synthetic_table()
+    raw, origin = he_data.synthetic_table()
     print("Synthetic cohort:", origin)
 elif HOSTED_LITE:
-    raw, origin = data.lite_study_table()
+    raw, origin = he_data.lite_study_table()
     print("Study data from", origin)
 else:
-    raw = load_rds(DATA_FILE)
-df = raw.sort_values(["name", "days_since_start"]).reset_index(drop=True)
+    # The dashboard's loader: R converts once into a cache outside the repo, clock times only, no calendar dates
+    raw = he_data._read_rds(DATA_FILE)
+# -999 → missing, `ascites` from current/previous ascites, one row per person-day (the valid-wear copy wins)
+df = he_data.harmonise_columns(raw.copy()).sort_values(["name", "days_since_start"], kind="stable").reset_index(drop=True)
 del raw
+DAY0 = he_data.first_day(df)  # 0 in the Nov 2026 file, 1 in older ones
 print(f"{df['name'].nunique()} participants, {len(df):,} participant-days")
 
 # %% [markdown]
@@ -203,9 +189,10 @@ print(f"{df['name'].nunique()} participants, {len(df):,} participant-days")
 # = baseline-only**, which confirms we can't place events in time.
 
 # %%
-CLINICAL_COLS = ["decomp", "anyhe", "anyOHE", "che_phes", "he_meds", "ever_he_meds", "ascites",
-                 "medication_for_ascites", "variceal_bleeding_history", "ctp_class", "meld", "phes_score",
-                 "psqiglobal", "cldq_total", "liver_frailty_index"]
+CLINICAL_COLS = ["decomp", "anyhe", "anyOHE", "che_phes", "he_meds", "ever_he_meds", "ascites", "current_ascites",
+                 "previous_ascites", "previous_encephalopathy", "medication_for_ascites", "variceal_bleeding_history",
+                 "ctp_class", "ctp_score", "meld", "phes_score", "total_bilirubin_t0", "albumin_t0", "inr_t0",
+                 "bb_use_t0", "psqiglobal", "cldq_total", "liver_frailty_index"]
 if absent := [c for c in CLINICAL_COLS if c not in df]:
     print("Not in this data, so not checked:", ", ".join(absent))
     CLINICAL_COLS = [c for c in CLINICAL_COLS if c in df]
@@ -219,69 +206,85 @@ changes
 # %% [markdown]
 # ### Build the daily measures
 #
-# * Only **valid days** (`valid80 == 1`, ≥80% wear) are used for measures;
-#   night-rest measures require both days spanned by the overnight window to be valid.
+# **Activity measures** (from the 5-minute activity string, steps, HRV, HR):
+# * Only **valid days** (`valid80 == 1`, ≥80% wear) count; night-rest measures
+#   require both days spanned by the overnight window to be valid. Other days
+#   are blanked, not dropped, so the sleep measures below keep them.
 # * An average HR of **0 bpm** is a recording error and is blanked out.
 # * **Night rest bout:** the longest stretch of "rest" in the activity string
 #   between 6 pm and noon the next day. Breaks of up to 10 minutes are allowed.
-#   This is our sleep proxy (see the exploration notebook, Step 8b).
-# * **Rest regularity (SRI)** is new, and the closest proxy for *sleep
-#   regularity*. For each pair of consecutive days, we check every 5-minute
+#   This is the activity-based sleep *proxy* (exploration notebook, Step 8b).
+# * **Rest regularity (SRI)**: for each pair of consecutive days, we check every 5-minute
 #   slot: was the person in the same state (resting vs. not resting) at the
 #   same clock time both days? SRI runs from **100** (identical days) through
 #   0 (random) to −100 (exactly flipped). It follows the published Sleep
 #   Regularity Index, applied here to Oura's rest/not-rest classes.
+#
+# Night rest and SRI use the dashboard's own functions (`_night_rest`, `_sri`
+# in `data.py`), so the numbers match the app.
+#
+# **Sleep measures** (from the Oura sleep record, Nov 2026 file): computed on
+# **main nights** only (`long_sleep`, 3–16 h in bed, 1–14 h asleep, hypnogram
+# length matching time in bed), the same rule as the exploration notebook's
+# Step 20. Not limited to `valid80` days. Bedtime and midpoint are in **hours
+# after 18:00** the evening before waking (9 = 03:00), so nights don't wrap at
+# midnight. A night is filed on its **wake day**.
 
 # %%
-SLOTS, DAY_STARTS_AT = 288, 4      # Oura activity day = 04:00 → 04:00 local, 5-min slots
-strings = df["class_5_min"].where(df["class_5_min"].str.fullmatch(r"[0-5]{288}", na=False))
+SLOTS = he_data.SLOTS
+strings = df["class_5_min"].where(df["class_5_min"].astype(str).str.fullmatch(rf"[0-5]{{{SLOTS}}}"))
 same_person_next = (df["name"].shift(-1) == df["name"]) & (df["days_since_start"].shift(-1) == df["days_since_start"] + 1)
 next_string = strings.shift(-1).where(same_person_next)
 valid_day = pd.to_numeric(df["valid80"], errors="coerce").eq(1)
 night_pair_ok = same_person_next & valid_day & valid_day.shift(-1, fill_value=False)
 
-win_start, win_end = (18 - DAY_STARTS_AT) * 12, SLOTS + (12 - DAY_STARTS_AT) * 12
-bout_re = re.compile(r"1(?:[0-5]{0,2}1)*")
-
-
-def night_rest(today, tomorrow):
-    if pd.isna(today) or pd.isna(tomorrow):
-        return (np.nan, np.nan)
-    window = (today + tomorrow)[win_start:win_end]
-    best = max(bout_re.finditer(window), key=lambda m: m.end() - m.start(), default=None)
-    if best is None or best.end() - best.start() < 24:
-        return (np.nan, np.nan)
-    return ((best.end() - best.start()) * 5 / 60, (best.start() + best.end()) / 2 * 5 / 60)
-
-
-def sri(today, tomorrow):
-    if pd.isna(today) or pd.isna(tomorrow):
-        return np.nan
-    a = np.frombuffer(today.encode(), dtype=np.uint8) - 48
-    b = np.frombuffer(tomorrow.encode(), dtype=np.uint8) - 48
-    worn = (a != 0) & (b != 0)
-    if worn.sum() < SLOTS * 0.8:
-        return np.nan
-    return 200 * ((a == 1) == (b == 1))[worn].mean() - 100
-
-
 df[["night_rest_h", "rest_mid_6pm"]] = pd.DataFrame(
-    [night_rest(t, n) for t, n in zip(strings.where(night_pair_ok), next_string.where(night_pair_ok))], index=df.index)
-df["sri"] = [sri(t, n) for t, n in zip(strings, next_string)]
+    [he_data._night_rest(t, n) for t, n in zip(strings.where(night_pair_ok), next_string.where(night_pair_ok))],
+    index=df.index)
+df["sri"] = [he_data._sri(t, n) for t, n in zip(strings, next_string)]
 df["active_h"] = strings.str.count("[345]") * 5 / 60
-df["average_heart_rate"] = df["average_heart_rate"].where(df["average_heart_rate"] > 0)
+df["average_heart_rate"] = pd.to_numeric(df["average_heart_rate"], errors="coerce").where(lambda v: v > 0)
 df.loc[~df["night_rest_h"].between(2, 16), "night_rest_h"] = np.nan
 
-valid = df[df["valid80"] == 1].copy()
+SLEEP_COLS = ["type", "sleep_phase_5_min", "num_sleep_phase_5_min", "time_in_bed_s", "total_sleep_duration",
+              "bedtime_start_h18"]
+HAVE_SLEEP = all(c in df for c in SLEEP_COLS)
+if HAVE_SLEEP:
+    num = lambda c: pd.to_numeric(df[c], errors="coerce")
+    hyp = df["sleep_phase_5_min"].where(df["sleep_phase_5_min"].astype(str).str.fullmatch(r"[1-4]+"))
+    tib, tst = num("time_in_bed_s") / 3600, num("total_sleep_duration") / 3600
+    n_slots = pd.to_numeric(hyp.str.len(), errors="coerce")
+    main = (df["type"].astype(str).eq("long_sleep") & tib.between(3, 16) & tst.between(1, 14)
+            & (n_slots - num("num_sleep_phase_5_min")).abs().le(0) & (n_slots - tib * 12).abs().le(2))
+    df["main_sleep"] = main
+    df["tst_h"] = tst.where(main)
+    df["efficiency"] = (100 * tst / tib).where(main)
+    df["waso_min"] = (pd.to_numeric(hyp.str.replace(r"^4+|4+$", "", regex=True).str.count("4"), errors="coerce") * 5).where(main)
+    df["mid_h18"] = (num("bedtime_start_h18") + tib / 2).where(main)
+    print(f"Main nights: {int(main.sum()):,} of {len(df):,} person-days")
+else:
+    df["main_sleep"] = False
+    print("No Oura sleep record in this file (older export): only the activity-based measures are used.")
 
-METRICS = {
-    "night_rest_h": "Night rest bout (h)",
-    "rest_mid_6pm": "Rest midpoint (h after 6 pm)",
+ACTIVITY_METRICS = {
+    "night_rest_h": "Night rest bout (h, proxy)",
+    "rest_mid_6pm": "Rest midpoint (h after 6 pm, proxy)",
     "sri": "Rest regularity (SRI)",
     "average_hrv": "HRV (ms)",
     "average_heart_rate": "Average HR (bpm)",
     "steps": "Steps / day",
 }
+SLEEP_METRICS = {
+    "tst_h": "Total sleep (h)",
+    "efficiency": "Sleep efficiency (%)",
+    "waso_min": "Awake after sleep onset (min)",
+    "mid_h18": "Sleep midpoint (h after 18:00)",
+} if HAVE_SLEEP else {}
+METRICS = {**SLEEP_METRICS, **ACTIVITY_METRICS}
+
+# One row per person-day: activity measures blanked on non-valid days, sleep measures blanked on non-main nights
+valid = df.copy()
+valid[list(ACTIVITY_METRICS) + ["active_h"]] = valid[list(ACTIVITY_METRICS) + ["active_h"]].where(valid_day, axis=0)
 
 # Baseline groups worth comparing (column, label for 0/No, label for 1/Yes)
 GROUPS = {
@@ -289,17 +292,23 @@ GROUPS = {
     "che_phes": ("Covert HE by PHES?", {"No": "No covert HE", "Yes": "Covert HE"}),
     "ctp_cat": ("Child-Pugh group", {"Child A": "Child A", "Child B/C": "Child B/C"}),
     "anyOHE": ("Overt HE ever?", {0: "No overt HE", 1: "Overt HE", "0": "No overt HE", "1": "Overt HE"}),
-    "he_meds": ("HE meds at enrolment?", {"No": "No HE meds", "Yes": "On HE meds"}),
+    "he_meds": ("HE meds at enrollment?", {"No": "No HE meds", "Yes": "On HE meds"}),
 }
+GROUPS = {c: g for c, g in GROUPS.items() if c in valid}
 for col, (_, mapping) in GROUPS.items():
     raw = valid[col].map(lambda v: int(v) if isinstance(v, float) and not np.isnan(v) else v)
     valid[f"grp_{col}"] = raw.map(mapping)
 
-print(f"{len(valid):,} valid days. Median night rest {valid['night_rest_h'].median():.1f} h, "
-      f"median SRI {valid['sri'].median():.0f}")
+print(f"{int(valid_day.sum()):,} valid days. Median night rest {valid['night_rest_h'].median():.1f} h, "
+      f"median SRI {valid['sri'].median():.0f}"
+      + (f"; median total sleep {valid['tst_h'].median():.1f} h on main nights" if HAVE_SLEEP else ""))
 
 # %% [markdown]
 # ## Part 3 · Trajectories: how do groups look over the 180 study days?
+#
+# With the Nov 2026 file each grouping gets two rows of charts: **real sleep**
+# (total sleep, efficiency, WASO, sleep midpoint; main nights) and the
+# **activity-based** measures. A sleep midpoint of 9 means 03:00.
 #
 # **How to read these charts.** Each line is a group's **median** across
 # people, one point per study week. The shaded band is the middle 50% of
@@ -315,14 +324,21 @@ print(f"{len(valid):,} valid days. Median night rest {valid['night_rest_h'].medi
 #   are **study-time** trajectories, not "before vs. after an event".
 
 # %%
-valid["week"] = (valid["days_since_start"] - 1) // 7 + 1
-weekly = valid.groupby(["name", "week"])[list(METRICS)].mean().reset_index()
+valid["week"] = (valid["days_since_start"] - DAY0) // 7 + 1
+# Weekly mean per person for activity, weekly median for sleep (a night or two of naps-only shouldn't dominate)
+weekly = valid.groupby(["name", "week"])[list(ACTIVITY_METRICS)].mean()
+if SLEEP_METRICS:
+    weekly = weekly.join(valid.groupby(["name", "week"])[list(SLEEP_METRICS)].median())
+weekly = weekly.reset_index()
 people = valid.groupby("name")[[f"grp_{c}" for c in GROUPS]].first()
 weekly = weekly.join(people, on="name")
 PALETTE = ["#2563eb", "#d97706"]
 
 
 def plot_trajectories(group_col: str, metrics=("night_rest_h", "sri", "average_hrv", "average_heart_rate", "steps")):
+    if group_col not in GROUPS:
+        print(f"No {group_col} column in this data, so this grouping is skipped.")
+        return
     title, mapping = GROUPS[group_col]
     levels = list(dict.fromkeys(mapping.values()))
     fig, axes = plt.subplots(1, len(metrics), figsize=(3.6 * len(metrics), 3.3), sharex=True)
@@ -348,6 +364,8 @@ def plot_trajectories(group_col: str, metrics=("night_rest_h", "sri", "average_h
 
 
 for g in ["decomp", "che_phes", "ctp_cat"]:
+    if SLEEP_METRICS:
+        plot_trajectories(g, metrics=tuple(SLEEP_METRICS))  # real sleep, main nights
     plot_trajectories(g)
 
 # %% [markdown]
@@ -372,15 +390,16 @@ slopes = pd.DataFrame({m: valid.groupby("name").apply(slope_per_30d, m, include_
 slopes = slopes.join(people)
 
 rows = []
-for g in ["decomp", "che_phes", "ctp_cat"]:
+for g in [g for g in ["decomp", "che_phes", "ctp_cat"] if g in GROUPS]:
     levels = list(dict.fromkeys(GROUPS[g][1].values()))
     for m in METRICS:
         a = slopes.loc[slopes[f"grp_{g}"] == levels[0], m].dropna()
         b = slopes.loc[slopes[f"grp_{g}"] == levels[1], m].dropna()
         p = stats.mannwhitneyu(a, b).pvalue if len(a) >= 3 and len(b) >= 3 else np.nan
-        rows.append((GROUPS[g][0], METRICS[m], f"{a.median():+.2f}", f"{b.median():+.2f}", round(p, 3),
+        rows.append((GROUPS[g][0], METRICS[m], f"{a.median():+.2f}", f"{b.median():+.2f}", fmt_p(p),
                      f"{levels[0]} vs {levels[1]}"))
-pd.DataFrame(rows, columns=["grouping", "measure", "median slope group 1", "median slope group 2", "p-value", "groups"])
+print("Exploratory and unadjusted: many comparisons, so about 1 in 20 with no real difference reach p < 0.05.")
+pd.DataFrame(rows, columns=["grouping", "measure", "median slope group 1", "median slope group 2", "p", "groups"])
 
 # %% [markdown]
 # ## Part 4 · Candidate events: sudden shifts within a person
@@ -402,7 +421,7 @@ WINDOW = 14
 
 
 def biggest_shift(sub: pd.DataFrame, col: str):
-    s = sub.set_index("days_since_start")[col].reindex(range(1, 181))
+    s = sub.set_index("days_since_start")[col].reindex(range(DAY0, int(df["days_since_start"].max()) + 1))
     if s.notna().sum() < 3 * WINDOW:
         return (np.nan, np.nan)
     before = s.rolling(WINDOW, min_periods=WINDOW // 2).mean()
@@ -415,7 +434,7 @@ def biggest_shift(sub: pd.DataFrame, col: str):
 
 
 shift_rows = []
-for m in ["night_rest_h", "average_hrv", "average_heart_rate", "steps"]:
+for m in [*(["tst_h", "mid_h18"] if HAVE_SLEEP else []), "night_rest_h", "average_hrv", "average_heart_rate", "steps"]:
     res = valid.groupby("name").apply(biggest_shift, m, include_groups=False)
     for pid, (day, z) in res.items():
         shift_rows.append((pid, METRICS[m], day, z))
@@ -435,7 +454,7 @@ if big.empty:
           + (" Expected on synthetic data: the generator has no events or trends." if SYNTHETIC else ""))
 else:
     fig, ax = plt.subplots(figsize=(9, 3))
-    for m, color in zip(big["measure"].unique(), ["#2563eb", "#d97706", "#16a34a", "#9333ea"]):
+    for m, color in zip(big["measure"].unique(), ["#2563eb", "#d97706", "#16a34a", "#9333ea", "#0891b2", "#be123c"]):
         ax.hist(big.loc[big["measure"] == m, "study_day"], bins=18, range=(0, 180), alpha=0.5, label=m, color=color)
     ax.set(title="When do the large shifts happen?", xlabel="study day", ylabel="number of shifts")
     ax.legend(fontsize=8)
@@ -453,7 +472,8 @@ else:
 # median of everyone.
 
 # %%
-def pre_post_plot(events: pd.DataFrame, metrics=("night_rest_h", "average_hrv", "average_heart_rate", "steps"),
+def pre_post_plot(events: pd.DataFrame, metrics=(*(["tst_h"] if HAVE_SLEEP else []), "night_rest_h", "average_hrv",
+                                                 "average_heart_rate", "steps"),
                   days: int = 28, title: str = "Around each event"):
     fig, axes = plt.subplots(1, len(metrics), figsize=(3.6 * len(metrics), 3.2), sharex=True)
     for ax, m in zip(axes, metrics):
@@ -496,11 +516,15 @@ else:
 # then let an algorithm group people who look alike. This is the
 # *"individual phenotype identification"* approach.
 #
-# **The numbers per person** (from valid days):
-# * typical night rest (median) and how much it varies (SD)
-# * typical rest midpoint (circadian timing) and its night-to-night spread
-# * rest regularity (median SRI)
-# * HRV, average HR and steps (medians)
+# **The numbers per person:**
+# * with the Oura sleep record (Nov 2026 file), from **main nights**: typical
+#   total sleep (median) and how much it varies (SD), sleep efficiency, and the
+#   sleep midpoint (circadian timing) with its night-to-night spread. People
+#   need at least **14 main nights**.
+# * without it (older files), the activity-based proxies instead: night rest
+#   and rest midpoint, median and SD.
+# * from valid days: rest regularity (median SRI), HRV, average HR and steps
+#   (medians). People need at least **30 valid days**.
 #
 # **The algorithm** is **k-means**. It puts people into *k* groups so that
 # people within a group are as similar as possible. We first put every
@@ -514,24 +538,33 @@ else:
 # clinical labels**, which is the table at the end.
 
 # %%
-features = valid.groupby("name").agg(
-    rest_median=("night_rest_h", "median"),
-    rest_sd=("night_rest_h", "std"),
-    midpoint_median=("rest_mid_6pm", "median"),
-    midpoint_sd=("rest_mid_6pm", "std"),
-    sri_median=("sri", "median"),
-    hrv_median=("average_hrv", "median"),
-    hr_median=("average_heart_rate", "median"),
-    steps_median=("steps", "median"),
-    valid_days=("days_since_start", "count"),
-)
-features = features[features["valid_days"] >= 30].drop(columns="valid_days").dropna()
-FEATURE_LABELS = {
-    "rest_median": "Night rest (h)", "rest_sd": "Night rest variability", "midpoint_median": "Rest midpoint",
-    "midpoint_sd": "Midpoint variability", "sri_median": "Rest regularity (SRI)", "hrv_median": "HRV",
-    "hr_median": "Average HR", "steps_median": "Steps",
-}
-print(f"{len(features)} people with ≥30 valid days and all features")
+if HAVE_SLEEP:
+    FEATURE_LABELS = {
+        "sleep_median": "Total sleep (h)", "sleep_sd": "Total sleep variability", "efficiency_median": "Sleep efficiency",
+        "midpoint_median": "Sleep midpoint", "midpoint_sd": "Midpoint variability",
+    }
+    features = valid.groupby("name").agg(
+        sleep_median=("tst_h", "median"), sleep_sd=("tst_h", "std"), efficiency_median=("efficiency", "median"),
+        midpoint_median=("mid_h18", "median"), midpoint_sd=("mid_h18", "std"), main_nights=("tst_h", "count"))
+    enough_sleep = features["main_nights"] >= 14
+else:
+    FEATURE_LABELS = {
+        "rest_median": "Night rest (h)", "rest_sd": "Night rest variability", "midpoint_median": "Rest midpoint",
+        "midpoint_sd": "Midpoint variability",
+    }
+    features = valid.groupby("name").agg(
+        rest_median=("night_rest_h", "median"), rest_sd=("night_rest_h", "std"),
+        midpoint_median=("rest_mid_6pm", "median"), midpoint_sd=("rest_mid_6pm", "std"))
+    enough_sleep = pd.Series(True, index=features.index)
+FEATURE_LABELS.update({"sri_median": "Rest regularity (SRI)", "hrv_median": "HRV", "hr_median": "Average HR",
+                       "steps_median": "Steps"})
+features = features.join(valid.groupby("name").agg(
+    sri_median=("sri", "median"), hrv_median=("average_hrv", "median"),
+    hr_median=("average_heart_rate", "median"), steps_median=("steps", "median")))
+valid_days_per_person = valid_day.groupby(df["name"]).sum()
+features = features[enough_sleep & (valid_days_per_person.reindex(features.index) >= 30)]
+features = features[list(FEATURE_LABELS)].dropna()
+print(f"{len(features)} people with enough data and all {len(FEATURE_LABELS)} features")
 
 X = StandardScaler().fit_transform(features)
 scores = {k: silhouette_score(X, KMeans(k, n_init=20, random_state=0).fit_predict(X)) for k in range(2, 6)}
@@ -569,7 +602,7 @@ features.groupby("phenotype")[list(FEATURE_LABELS)].median().round(1).rename(col
 # %% [markdown]
 # ### A map of everyone
 #
-# **PCA** squeezes the 8 numbers per person down to 2, so we can draw everyone
+# **PCA** squeezes the numbers per person down to 2, so we can draw everyone
 # on a flat map. People close together have similar Oura patterns. Colours are
 # the phenotypes. If the colours form clear islands, the types are real
 # separations. If they blur together, the types are more like regions of a
@@ -606,8 +639,8 @@ for col, (title, mapping) in GROUPS.items():
         continue
     p = stats.fisher_exact(tab.values).pvalue if tab.shape == (2, 2) else stats.chi2_contingency(tab.values).pvalue
     pct = (tab[True] / tab.sum(axis=1) * 100).round(0).astype(int).astype(str) + "%"
-    label_rows.append({"label": positive, **pct.to_dict(), "p-value": round(p, 3)})
-pd.DataFrame(label_rows)
+    label_rows.append({"label": positive, **pct.to_dict(), "p": fmt_p(p), "p (raw)": p})
+pd.DataFrame(label_rows).drop(columns="p (raw)", errors="ignore")
 
 # %% [markdown]
 # ## Part 6 · Summary
@@ -624,12 +657,13 @@ lines = [
     f"/{len(changes)} never change within a person, so pre/post-event plots need an event table "
     "(name + study day) from the study team or the EHR.",
     f"- Night rest bout median {valid['night_rest_h'].median():.1f} h; rest regularity (SRI) median "
-    f"{valid['sri'].median():.0f}.",
+    f"{valid['sri'].median():.0f}."
+    + (f" Oura sleep record: median total sleep {valid['tst_h'].median():.1f} h on main nights." if HAVE_SLEEP else ""),
     f"- Phenotypes: {K} types among {len(features)} people (silhouette {scores[K]:.2f}).",
 ]
 for r in label_rows:
-    if r["p-value"] < 0.05:
-        lines.append(f"- {r['label']} differs across phenotypes (p = {r['p-value']}).")
+    if r["p (raw)"] < 0.05:
+        lines.append(f"- {r['label']} differs across phenotypes (p {r['p'] if r['p'].startswith('<') else '= ' + r['p']}; exploratory).")
 lines.append(f"- Candidate change points (|z| ≥ 1.5): {big['name'].nunique()} people. "
              "List saved locally to compare with real event dates.")
 summary = "\n".join(lines)

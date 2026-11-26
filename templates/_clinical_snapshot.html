@@ -1,24 +1,25 @@
-{# Clinical snapshot side panel: three dropdowns (data.SNAPSHOT_SECTIONS). Status = baseline fields (data.CLINICAL_SNAPSHOT);
-   Medications and Clinical history = generated rows on synthetic data, a no-data note on study data (data.snapshot_extras). #}
+{# Clinical snapshot side panel. "At enrollment" = baseline fields (data.clinical_snapshot: empty fields hidden, listed
+   once as "Not recorded"). Medications and Clinical history = illustrative rows, synthetic data only (data.snapshot_extras). #}
 {% set x = p.extras %}
+{% set c = p.clinical %}
 <aside class="clinical-panel" id="clinicalSnapshot" aria-labelledby="clinicalTitle">
     <div class="cp-header">
         <h2 id="clinicalTitle">Clinical snapshot</h2>
     </div>
 
     <details class="cp-section" id="cpStatus" open>
-        <summary>{{ sections.status }} <span class="cp-sub">At enrolment · study day 0</span></summary>
+        <summary>{{ sections.status }} <span class="cp-sub">Baseline values</span></summary>
         <div class="cp-section-body">
-        {% for g in p.clinical %}
+        {% for g in c.groups %}
         <div class="cp-item">
             <div class="cp-left"><div class="cp-dot{% if loop.first %} accent{% endif %}"></div><div class="cp-spine"></div></div>
             <div class="cp-body">
-                <div class="cp-group">{{ g.group }} <span>at enrolment</span></div>
+                <div class="cp-group">{{ g.group }}</div>
                 <div class="cp-grid">
                     {% for f in g.fields %}
-                    <div class="cp-cell" title="{{ f.label }} at enrolment">
+                    <div class="cp-cell" title="{{ f.label }}">
                         <div class="cp-lbl">{{ f.label }}</div>
-                        <div class="cp-val{% if f.value is none %} missing{% endif %}">{{ f.value if f.value is not none else '—' }}</div>
+                        <div class="cp-val">{{ f.value }}</div>
                     </div>
                     {% endfor %}
                 </div>
@@ -27,15 +28,15 @@
         {% else %}
         <p class="cp-empty">No clinical fields in this dataset.</p>
         {% endfor %}
+        {% if c.not_recorded %}<p class="cp-missing">Not recorded at enrollment: {{ c.not_recorded | join(', ') }}</p>{% endif %}
+        {% if c.study %}<p class="cp-study">{% for f in c.study %}{{ f.label }} {{ f.value }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
         </div>
     </details>
 
+{% if x.synthetic %}
     <details class="cp-section" id="cpMedications">
         <summary>{{ sections.medications }}{% if x.synthetic %} <span class="cp-tag">Synthetic</span>{% endif %}</summary>
         <div class="cp-section-body">
-        {% if x.medications is none %}
-        <p class="cp-empty">{{ no_data_note }}</p>
-        {% else %}
         {% for m in x.medications %}
         <div class="cp-med">
             <div class="cp-med-name">{{ m.name }} <span>{{ m.dose }}</span></div>
@@ -44,16 +45,12 @@
         {% else %}
         <p class="cp-empty">No medications listed.</p>
         {% endfor %}
-        {% endif %}
         </div>
     </details>
 
     <details class="cp-section" id="cpHistory">
         <summary>{{ sections.history }}{% if x.synthetic %} <span class="cp-tag">Synthetic</span>{% endif %}</summary>
         <div class="cp-section-body">
-        {% if x.history is none %}
-        <p class="cp-empty">{{ no_data_note }}</p>
-        {% else %}
         {% for e in x.history %}
         <div class="cp-item">
             <div class="cp-left"><div class="cp-dot{% if e.kind == 'Hospitalization' %} accent{% endif %}"></div><div class="cp-spine"></div></div>
@@ -65,7 +62,7 @@
         {% else %}
         <p class="cp-empty">No events in this period.</p>
         {% endfor %}
-        {% endif %}
         </div>
     </details>
+{% endif %}
 </aside>

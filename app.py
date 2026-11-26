@@ -45,6 +45,9 @@ NOTEBOOK_REF = os.environ.get("NOTEBOOK_REF", "main")
 JUPYTERLITE_URL = os.environ.get("JUPYTERLITE_URL", "https://dicristea.github.io/jupyterhealth-he-dashboard").rstrip("/")
 # Written out rather than globbed: the Docker image holds no notebooks/ folder, and a test keeps this in step with it.
 DEMO_NOTEBOOKS = [
+    {"name": "data_overview", "title": "What's in the newest de-identified file",
+     "description": "A plain-language inventory: how many people and days, what every column means (with units), "
+                    "how complete each column is, and what the file does not contain. Aggregates only."},
     {"name": "deid_oura_data_exploration", "title": "Getting to know the dataset",
      "description": "A beginner-friendly tour: who is in the cohort, how complete each patient's data is, "
                     "and what the sleep and activity measures look like."},
@@ -171,12 +174,15 @@ def patients():
 
 @app.route("/patient/<pid>")
 def patient(pid):
-    detail = data.patient_detail(pid)
+    # ?window=7|14: the recent window the cards compare with the usual range; anything else falls back to 14.
+    raw = request.args.get("window", "")
+    window = int(raw) if raw.isdigit() and int(raw) in data.WINDOWS else data.RECENT_DAYS
+    detail = data.patient_detail(pid, window)
     if detail is None:
         abort(404)
     ctx = session.get("ehr_context")
     return render_template("patient.html", active="patients", p=detail,
-                           sections=data.SNAPSHOT_SECTIONS, no_data_note=data.SNAPSHOT_NO_DATA,
+                           sections=data.SNAPSHOT_SECTIONS,
                            ehr_context=ctx if ctx and ctx.get("patient") == pid else None)
 
 
@@ -336,7 +342,7 @@ def cohort():
 def api_cohort():
     sel = _selection(request.args)
     try:
-        return jsonify(data.cohort_compare(request.args.get("group", "decomp"), request.args.get("metric", "night_rest_h"), sel["ids"]))
+        return jsonify(data.cohort_compare(request.args.get("group", "decomp"), request.args.get("metric", data.DEFAULT_COHORT_METRIC), sel["ids"]))
     except KeyError:
         abort(400)
 
@@ -348,7 +354,8 @@ def cohort_report():
     summary = data.cohort_summary(sel["ids"])
     if group not in summary["groups"]:
         abort(400)
-    comparisons = {m: data.cohort_compare(group, m, sel["ids"]) for m in data.METRICS}
+    # A list, not a dict: tojson sorts dict keys, and the report keeps the Measure menu's order.
+    comparisons = [[m, data.cohort_compare(group, m, sel["ids"])] for m in data.COHORT_METRICS]
     return render_template("report.html", summary=summary, sel=sel, group_label=summary["groups"][group],
                            comparisons=comparisons, generated=datetime.now().strftime("%b %d, %Y %H:%M"))
 
@@ -465,31 +472,37 @@ def _build_cohort_notebook(sel: dict, group: str) -> nbformat.NotebookNode:
         nbformat.v4.new_markdown_cell("## Summary"),
         nbformat.v4.new_code_cell(
             "s = data.cohort_summary(ids)\n"
-            "pd.Series({k: s[k] for k in ['participants', 'days', 'valid_pct', 'median_days', 'night_rest', 'sri']})"),
+            "pd.Series({k: s[k] for k in ['participants', 'days', 'valid_pct', 'median_days', 'sleep_mid', 'sleep_tst']})"),
         nbformat.v4.new_markdown_cell(
-            "## Group comparison for every measure\n\nMedian of each person's valid days. "
-            "Mann-Whitney p-value: below 0.05 is worth a closer look, not proof."),
+            "## Group comparison for every measure\n\n"
+            "Each person's median over their main nights (sleep, HR, HRV, SpO₂) or valid days (steps, activity "
+            "measures), for people with at least 14 values. Two groups: Mann-Whitney; more: Kruskal-Wallis. "
+            "Groups with fewer than 5 people are not tested. Exploratory: unadjusted for age, sex, beta-blockers, "
+            "site or arm, and about 1 in 20 comparisons reaches p < 0.05 by chance."),
         nbformat.v4.new_code_cell(
             "rows = []\n"
-            "for m, spec in data.METRICS.items():\n"
+            "for m, spec in data.COHORT_METRICS.items():\n"
             "    c = data.cohort_compare(GROUP, m, ids)\n"
             "    row = {'measure': spec['label']}\n"
             "    for l in c['levels']:\n"
             "        row[l['name']] = l['overall_median']\n"
             "        row[f\"n {l['name']}\"] = l['n']\n"
-            "    row['p-value'] = c.get('p_value')\n"
+            "    row['p'] = c.get('p_text', '')\n"
+            "    row['reading'] = c['direction']\n"
             "    rows.append(row)\n"
             "pd.DataFrame(rows)"),
-        nbformat.v4.new_markdown_cell("## Trajectories over the study (weekly median and middle 50%)"),
+        nbformat.v4.new_markdown_cell("## Trajectories over the study (weekly median and middle 50%)\n\n"
+                                      "Weeks with fewer than 5 people in a group are hidden. Later weeks include "
+                                      "fewer people (dropout), so the tail is not a trend."),
         nbformat.v4.new_code_cell(
-            "fig, axes = plt.subplots(2, 4, figsize=(16, 6.5))\n"
-            "for ax, (m, spec) in zip(axes.flat, data.METRICS.items()):\n"
+            "fig, axes = plt.subplots(3, 4, figsize=(16, 9.5))\n"
+            "for ax, (m, spec) in zip(axes.flat, data.COHORT_METRICS.items()):\n"
             "    c = data.cohort_compare(GROUP, m, ids)\n"
-            "    for color, l in zip(['#2563eb', '#d97706'], c['levels']):\n"
+            "    for color, l in zip(['#2563eb', '#d97706', '#059669', '#7c3aed'], c['levels']):\n"
             "        ax.plot(l['weeks'], l['median'], color=color, lw=2, label=f\"{l['name']} (n={l['n']})\")\n"
             "        ax.fill_between(l['weeks'], l['q1'], l['q3'], color=color, alpha=0.15)\n"
             "    ax.set_title(spec['label']); ax.set_xlabel('study week')\n"
-            "axes.flat[0].legend(fontsize=8)\nfor ax in list(axes.flat)[len(data.METRICS):]: ax.set_axis_off()\n"
+            "axes.flat[0].legend(fontsize=8)\nfor ax in list(axes.flat)[len(data.COHORT_METRICS):]: ax.set_axis_off()\n"
             "plt.tight_layout(); plt.show()"),
         nbformat.v4.new_markdown_cell("## Your analysis\n\nAdd cells below, or ask Jupyter AI in the chat panel."),
         nbformat.v4.new_code_cell(""),
@@ -553,7 +566,7 @@ def study_data():
     if not data.HOSTED_STUDY or data.HOSTED_DATA_FILE is None:
         abort(404)
     res = send_file(data.HOSTED_DATA_FILE, mimetype="application/gzip", max_age=0, conditional=False,
-                    download_name="study.v2.csv.gz")
+                    download_name=f"study.{data.CACHE_VERSION}.csv.gz")
     res.headers.update({"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
     return res
 
