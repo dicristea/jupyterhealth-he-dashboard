@@ -18,10 +18,12 @@ ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK_DIR = ROOT / "notebooks"
 OUT_DIR = ROOT / "rendered_notebooks"
 # Same names as app.RENDERED_NOTEBOOKS (a test checks they match).
-NOTEBOOKS = ["data_overview", "oura_data_exploration", "he_trajectories_phenotypes"]
+NOTEBOOKS = ["data_overview", "synthetic_data_exploration", "he_trajectories_phenotypes"]
 # Not part of the demo: the speech notebook needs recordings, which are never public, and its Praat/librosa
 # stack isn't installed in the Docker builder stage.
-NOT_RENDERED = {"speech_features_starter"}
+NOT_RENDERED = {"speech_features_starter",
+                # The study team's exploration (private repo only; export-ignore keeps it out of the public one).
+                "deid_data_exploration"}
 # Where the app and the notebooks look for the study file by default (data.DEFAULT_DATA_DIR, and
 # "../../de-identified data" seen from notebooks/).
 STUDY_DIRS = [ROOT.parent / "de-identified data", (NOTEBOOK_DIR / "../../de-identified data").resolve()]

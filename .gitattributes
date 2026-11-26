@@ -1,0 +1,3 @@
+CLAUDE.md export-ignore
+notebooks/deid_data_exploration.py export-ignore
+scripts/make_exploration_notebooks.py export-ignore

@@ -22,7 +22,7 @@
 #    recognisable "types" based on their own Oura patterns, and do those types
 #    line up with their clinical labels?
 #
-# It builds on `oura_data_exploration`: same data file, same loader,
+# It builds on the data exploration notebook: same data file, same loader,
 # the same **main-night** sleep measures (its Step 20) and the activity-based
 # **night rest bout** proxy for files without a sleep record.
 #

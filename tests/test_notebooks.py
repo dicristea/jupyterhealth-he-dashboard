@@ -17,7 +17,11 @@ def _execute(name: str):
     return "".join(o.get("text", "") for c in nb.cells if c.cell_type == "code" for o in c.outputs)
 
 
-@pytest.mark.parametrize("name", ["oura_data_exploration", "he_trajectories_phenotypes"])
+# deid_data_exploration is private-repo only (export-ignore); the public copy of these tests skips it.
+EXPLORATIONS = [n for n in ["deid_data_exploration", "synthetic_data_exploration"] if (NOTEBOOKS / f"{n}.py").exists()]
+
+
+@pytest.mark.parametrize("name", [*EXPLORATIONS, "he_trajectories_phenotypes"])
 def test_notebook_runs_on_synthetic_data(name, monkeypatch):
     monkeypatch.setenv("HE_DATA_SOURCE", "synthetic")
     text = _execute(name)
@@ -34,12 +38,22 @@ def test_data_overview_runs_on_synthetic_data(monkeypatch):
         assert raw_rows not in src, raw_rows
 
 
-@pytest.mark.parametrize("name", ["oura_data_exploration", "he_trajectories_phenotypes", "data_overview"])
+def test_the_two_explorations_differ_only_in_data_and_wording():
+    if len(EXPLORATIONS) < 2:
+        pytest.skip("public repo: only the synthetic exploration")
+    code = [[c.source for c in jupytext.read(NOTEBOOKS / f"{n}.py").cells if c.cell_type == "code"] for n in EXPLORATIONS]
+    assert [c.replace('SOURCE = os.environ.get("HE_DATA_SOURCE", "auto")  # study data when it can be found', 'SOURCE = "synthetic"')
+            for c in code[0]] == code[1]
+    synthetic_text = (NOTEBOOKS / "synthetic_data_exploration.py").read_text().lower()
+    assert "de-identified" not in synthetic_text and "deid" not in synthetic_text
+
+
+@pytest.mark.parametrize("name", [*EXPLORATIONS, "he_trajectories_phenotypes", "data_overview"])
 def test_notebooks_open_the_study_file_only_through_data_py(name):
     # data.py's R step is the one place calendar dates are reduced to clock times; a notebook with its own
     # conversion could write a dated cache.
     src = "\n".join(c.source for c in jupytext.read(NOTEBOOKS / f"{name}.py").cells if c.cell_type == "code")
-    assert "_read_rds(" in src
+    assert "_read_rds(" in src or "notebook_table(" in src
     for own_loader in ("readRDS", "Rscript", "R_TO_CSV", "pyreadr", "write.csv"):
         assert own_loader not in src, own_loader
 

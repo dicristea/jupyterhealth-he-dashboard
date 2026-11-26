@@ -45,18 +45,29 @@ NOTEBOOK_DIRS = [Path(p).expanduser().resolve() for p in
 NOTEBOOK_REPO = os.environ.get("NOTEBOOK_REPO", "dicristea/jupyterhealth-he-dashboard")
 NOTEBOOK_REF = os.environ.get("NOTEBOOK_REF", "main")
 JUPYTERLITE_URL = os.environ.get("JUPYTERLITE_URL", "https://dicristea.github.io/jupyterhealth-he-dashboard").rstrip("/")
-# The data notebooks, in every mode (data-neutral wording: the same list serves the public demo and the study).
+# The data notebooks. The public demo lists the synthetic exploration; the study site and local copy list the
+# de-identified one (notebooks/deid_data_exploration.py is export-ignore in .gitattributes, so it never reaches the
+# public repo). Both explorations are built from one outline and differ only in data and wording.
 # Written out rather than globbed: the Docker image holds no notebooks/ folder, and a test keeps this in step with it.
-NOTEBOOKS = [
-    {"name": "data_overview", "title": "What's in the dataset",
-     "description": "A plain-language inventory: how many people and days, what every column means (with units), "
-                    "how complete each column is, and what the data does not contain. Aggregates only."},
-    {"name": "oura_data_exploration", "title": "Getting to know the dataset",
-     "description": "A beginner-friendly tour: who is in the cohort, how complete each patient's data is, "
-                    "what sleep and activity look like, and detailed activity and vitals views per patient."},
-    {"name": "he_trajectories_phenotypes", "title": "Trajectories and phenotypes",
+_OVERVIEW = {"name": "data_overview", "title": "What's in the dataset",
+             "description": "A plain-language inventory: how many people and days, what every column means (with "
+                            "units), how complete each column is, and what the data does not contain. Aggregates only."}
+_TRAJECTORIES = {"name": "he_trajectories_phenotypes", "title": "Trajectories and phenotypes",
      "description": "How groups of patients (for example decompensated vs. compensated) compare across the "
-                    "study days, and whether patients cluster into a few recognisable types."},
+                    "study days, and whether patients cluster into a few recognisable types."}
+DEMO_NOTEBOOKS = [
+    _OVERVIEW,
+    {"name": "synthetic_data_exploration", "title": "Getting to know the synthetic data",
+     "description": "A short tour of the demo's synthetic cohort: who is in it, how complete it is, sleep, activity "
+                    "and overnight vitals, and how clinical groups compare. Same analysis as the study team's."},
+    _TRAJECTORIES,
+]
+STUDY_NOTEBOOKS = [
+    _OVERVIEW,
+    {"name": "deid_data_exploration", "title": "Getting to know the de-identified data",
+     "description": "A short tour of the study data: who is in it, how complete it is, sleep, activity and "
+                    "overnight vitals, and how clinical groups compare. Aggregates, plus one unnamed example participant."},
+    _TRAJECTORIES,
 ]
 # Shared password (docs/hosting.md). Optional for the synthetic demo, required for the hosted study site.
 DEMO_USER = os.environ.get("DEMO_USER", "demo")
@@ -531,12 +542,12 @@ def _demo_notebooks() -> list[dict]:
              "lite_url": f"{JUPYTERLITE_URL}/lab/index.html?path=notebooks/{nb['name']}.ipynb",
              "binder_url": f"https://mybinder.org/v2/gh/{NOTEBOOK_REPO}/{ref}"
                            f"?urlpath=lab/tree/notebooks/{nb['name']}.ipynb"}
-            for nb in NOTEBOOKS]
+            for nb in DEMO_NOTEBOOKS]
 
 
 def _hosted_notebooks() -> list[dict]:
     return [{**nb, "lite_url": f"{_lite_url()}?path=notebooks/{nb['name']}.ipynb",
-             "download_url": f"/lite/files/notebooks/{nb['name']}.ipynb"} for nb in NOTEBOOKS]
+             "download_url": f"/lite/files/notebooks/{nb['name']}.ipynb"} for nb in STUDY_NOTEBOOKS]
 
 
 # The hosted study site's JupyterLite: static files from Dockerfile.deid's builder stage, no data in them. Behind
@@ -575,7 +586,7 @@ def study_data():
 # Read-only notebook pages for the public demo, rendered on synthetic data in the Docker builder stage
 # (scripts/render_notebooks.py, same names). The app never runs a notebook; it only serves these files.
 RENDERED_DIR = HERE / "rendered_notebooks"
-RENDERED_NOTEBOOKS = {nb["name"]: nb["title"] for nb in NOTEBOOKS}  # the allowlist
+RENDERED_NOTEBOOKS = {nb["name"]: nb["title"] for nb in DEMO_NOTEBOOKS}  # the allowlist
 # The page is static: no scripts, no requests anywhere, sandboxed even when opened outside the iframe.
 NOTEBOOK_CSP = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; "
                 "form-action 'none'; frame-ancestors 'self'; sandbox allow-top-navigation-by-user-activation")
@@ -612,7 +623,7 @@ def notebook_page(name):
 # Notebooks shown as read-only code in every mode (never run by the app). Both Dockerfiles copy these files.
 CODE_PAGES = {"speech_features_starter": "Speech features (starter)"}
 # Locally, the data notebooks' source can be read the same way (the hosted images don't ship their .py files).
-LOCAL_CODE_PAGES = {nb["name"]: nb["title"] for nb in NOTEBOOKS}
+LOCAL_CODE_PAGES = {nb["name"]: nb["title"] for nb in STUDY_NOTEBOOKS + DEMO_NOTEBOOKS}
 
 
 def _code_cells(source: str) -> list[dict]:
@@ -735,7 +746,8 @@ def _lab_path(path: Path) -> str | None:
 
 def _local_notebooks() -> tuple[list[dict], list[dict]]:
     registered = []
-    for nb in NOTEBOOKS:
+    # The study notebooks, then the synthetic exploration (to compare with the demo); a missing .py is skipped
+    for nb in STUDY_NOTEBOOKS + [n for n in DEMO_NOTEBOOKS if n not in STUDY_NOTEBOOKS]:
         src = NOTEBOOK_SRC / f"{nb['name']}.py"
         if not src.is_file():
             continue

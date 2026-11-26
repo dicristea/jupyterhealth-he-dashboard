@@ -53,14 +53,16 @@
             <span>Sleep cards, HRV, heart rate and SpO₂ use main nights (Oura measures them overnight).</span>
             <span>Steps and rest regularity use days with ≥80% ring wear.</span>
             <span>Recent = median of the last {{ p.window }} study days (needs {{ p.min_recent }} nights; bedtime variability needs {{ p.bed_sd_min }}). Usual range = middle 50% of the nights before that, needing ≥{{ p.min_base }}.</span>
-            <span>A missing night is never counted as zero.</span>
+            <span>A missing night means no sleep record, not poor sleep, and is never counted as zero.</span>
+            <span>Comparisons are with this patient's own usual nights, not a normal range.</span>
+            <span>Sleep measures come from a consumer ring (Oura) and are not validated for diagnosing HE or sleep disorders.</span>
         </span>
     </span>
     <nav class="seg window-seg" aria-label="Recent window">
         {% for w in p.windows %}<a href="?window={{ w }}" class="{% if w == p.window %}on{% endif %}"{% if w == p.window %} aria-current="true"{% endif %}>Last {{ w }} days</a>{% endfor %}
     </nav>
 </div>
-<p class="sub" style="margin-bottom:12px">Each card's large value is the median of the last {{ p.window }} study days (bedtime variability: the spread of bedtimes over those days), compared with this patient's own usual range: the middle 50% of their earlier nights, shaded green. Not a normal range. Click a card for the night-by-night chart.</p>
+<p class="sub" style="margin-bottom:12px">Each card's large value is the median of the last {{ p.window }} study days (bedtime variability: the spread of bedtimes over those days), compared with this patient's own usual range: the middle 50% of their earlier nights, shaded green, not a normal range. Click a card for the night-by-night chart.</p>
 <div class="cards" id="tiles">
     {% for t in p.tiles %}{{ tile(t, loop.index0) }}{% endfor %}
     {% include "_speech_placeholder.html" %}
@@ -107,32 +109,40 @@
 
 {% set a = p.activity %}
 {% if a %}
-<div class="section-head"><h2 class="section">Activity</h2></div>
-<p class="sub" style="margin-bottom:12px">From Oura's 5-minute activity record, on the {{ a.days }} days with ≥80% ring wear.</p>
+<div class="section-head">
+    <h2 class="section">Activity</h2>
+    <span class="info" id="activityInfo">
+        <button type="button" class="info-btn" aria-label="Where the activity charts come from" aria-expanded="false" aria-controls="activityInfoTip">i</button>
+        <span class="info-tip" id="activityInfoTip" role="tooltip">
+            <strong>Where these charts come from</strong>
+            <span>Oura's activity record: one value every 5 minutes. A day runs from 04:00 to 04:00, so a night stays in one row.</span>
+            <span>Only the {{ a.days }} days with ≥80% ring wear count; days with less wear are left out (hatched in the day-by-day chart).</span>
+            <span>Activity intensity is in MET: 1 = resting, 3 = light walking, 6+ = vigorous.</span>
+            <span>Activity levels are Oura's own classes (rest, inactive, low, medium, high). Rest includes sleep.</span>
+            <span>Consumer ring estimates, not validated for clinical use.</span>
+        </span>
+    </span>
+</div>
 <div class="two-col">
     <div class="card">
         <h2>24-hour activity profile</h2>
-        <p class="hint">All valid days stacked on one clock, 04:00 to 04:00. Dark line = typical (median) activity intensity; darker band = middle 50% of days, lighter band = 80%. Purple shading = times this patient is usually resting; daytime shading can mean napping.</p>
+        <p class="hint">All valid days on one clock. Dark line = typical activity; darker band = middle 50% of days, lighter = 80%. Purple shading = usual rest times; daytime shading can mean napping.</p>
         <div id="profile"></div>
     </div>
     <div class="card">
         <h2>Time in each activity level</h2>
-        <p class="hint">Average hours per day in each Oura activity class, over valid days.</p>
+        <p class="hint">Average hours per day at each level.</p>
         <div id="classes"></div>
     </div>
 </div>
 <div class="card">
     <h2>Rest and activity, day by day (last {{ a.actogram | length }} days)</h2>
-    <p class="hint">One row per study day (most recent at the bottom), one column per 5 minutes from 04:00 to 04:00. Aligned dark-blue blocks at night mean a regular sleep-wake pattern; blocks drifting later or appearing in the day can mean a disturbed rhythm. Hatched rows had &lt;80% ring wear.</p>
+    <p class="hint">One row per study day, most recent at the bottom. Aligned dark-blue blocks at night mean a regular sleep-wake pattern; blocks drifting later or appearing in the day can mean a disturbed rhythm.</p>
     <div id="actogram"></div>
     <div class="legend" id="actLegend"></div>
 </div>
 {% endif %}
 
-<footer class="caveats">
-    <p>Sleep measures come from a consumer ring (Oura) and are not validated for diagnosing HE or sleep disorders.</p>
-    <p>Comparisons are with this patient's own usual nights, not a normal range. A missing night means no sleep record, not poor sleep.</p>
-</footer>
 </div><!-- /.pt-main -->
 </div><!-- /.pt-layout -->
 
@@ -203,11 +213,13 @@
     document.getElementById('timing').addEventListener('nightselect', e => { selectedDay = e.detail.day; });
     // Sparklines inside a closed <details> have no width until it opens
     // "i" popover: hover or keyboard focus shows it (CSS); a click or tap pins it open, Escape or a click outside closes.
-    const info = document.getElementById('statsInfo'), infoBtn = info.querySelector('.info-btn');
-    const setInfo = open => { info.classList.toggle('open', open); infoBtn.setAttribute('aria-expanded', String(open)); };
-    infoBtn.addEventListener('click', e => { e.stopPropagation(); setInfo(!info.classList.contains('open')); });
-    document.addEventListener('click', e => { if (!info.contains(e.target)) setInfo(false); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') { setInfo(false); } });
+    document.querySelectorAll('.info').forEach(info => {
+        const btn = info.querySelector('.info-btn');
+        const setInfo = open => { info.classList.toggle('open', open); btn.setAttribute('aria-expanded', String(open)); };
+        btn.addEventListener('click', e => { e.stopPropagation(); setInfo(!info.classList.contains('open')); });
+        document.addEventListener('click', e => { if (!info.contains(e.target)) setInfo(false); });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') setInfo(false); });
+    });
     const more = document.getElementById('moreMeasures');
     if (more) more.addEventListener('toggle', drawStatic);
     let resizeTimer;

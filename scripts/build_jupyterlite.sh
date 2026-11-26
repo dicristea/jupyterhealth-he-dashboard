@@ -43,6 +43,9 @@ for src in "$ROOT"/notebooks/*.py; do
   name="$(basename "$src" .py)"
   # Praat (parselmouth) has no Pyodide build, so the speech notebook can't run in the browser.
   if [ "$name" = "speech_features_starter" ]; then continue; fi
+  # Each site gets its own exploration: synthetic on the public site, de-identified on the study site.
+  if [ "$VARIANT" = "hosted-study" ] && [ "$name" = "synthetic_data_exploration" ]; then continue; fi
+  if [ "$VARIANT" != "hosted-study" ] && [ "$name" = "deid_data_exploration" ]; then continue; fi
   "$PYTHON" -m jupytext --quiet --to ipynb --update-metadata "$KERNELSPEC" \
     --output "$STAGE/notebooks/$name.ipynb" "$src"
 done

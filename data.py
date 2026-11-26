@@ -712,7 +712,7 @@ def synthetic_cohort(n: int = 24, seed: int = 7, min_days: int = 90, max_days: i
             met = met_by_class[slots.astype(int)] * rng.uniform(*act["met_jitter"], SLOTS)
             non_wear_pct = float((slots == "0").mean())
             row = {**base, "met_5min": ",".join(f"{m:.2f}" for m in met), "days_since_start": day,
-                   # Not in the current study file; kept because notebooks/oura_data_exploration.py needs it
+                   # Not in the current study file; kept for the notebooks
                    "day_type": "Weekend" if day % 7 in (6, 0) else "Weekday",
                    "valid80": int(non_wear_pct <= 0.2), "non_wear_pct": non_wear_pct,
                    "average_hrv": max(floor["hrv_ms"], rng.normal(hrv0, day_sd["hrv_ms"])),
@@ -917,6 +917,12 @@ def load() -> tuple[pd.DataFrame, str]:
         raise FileNotFoundError(f"Study data not found: {DATA_FILE}")
     else:
         df, source = synthetic_cohort(), "synthetic"
+    return derive_measures(df), source
+
+
+def derive_measures(df: pd.DataFrame) -> pd.DataFrame:
+    """Harmonised columns plus every derived measure the app uses (night rest, SRI, per-night sleep, bedtime SD,
+    grouping columns), for a raw table from any source."""
     df = harmonise_columns(df).sort_values(["name", "days_since_start"], kind="stable").reset_index(drop=True)
     strings = df["class_5_min"].where(df["class_5_min"].str.fullmatch(rf"[0-5]{{{SLOTS}}}", na=False))
     next_ok = (df["name"].shift(-1) == df["name"]) & (df["days_since_start"].shift(-1) == df["days_since_start"] + 1)
@@ -934,7 +940,28 @@ def load() -> tuple[pd.DataFrame, str]:
     for col, spec in GROUPS.items():
         if col in df:
             df[f"grp_{col}"] = df[col].map(lambda v: int(v) if isinstance(v, float) and not np.isnan(v) else v).map(spec["levels"])
-    return df, source
+    return df
+
+
+def notebook_table(source: str = "auto") -> tuple[pd.DataFrame, str]:
+    """(table with derived measures, where it came from) for the notebooks. `source`: "synthetic" (the in-memory
+    default cohort, or SYNTHETIC_FILE locally), "study" (the .rds through the R step, which keeps clock times only;
+    in the hosted study site's JupyterLite, the site's data), or "auto" (study when a study file is found, else
+    synthetic)."""
+    source = source.strip().lower()
+    if source not in {"auto", "study", "synthetic"}:
+        raise ValueError("source must be auto, study or synthetic")
+    if source != "synthetic" and in_hosted_lite():
+        raw, origin = lite_study_table()
+        return derive_measures(raw.copy()), origin
+    if source == "auto":
+        found = DATA_FILE is not None or len([p for p in DEFAULT_DATA_DIR.glob("*.rds") if not p.name.startswith(".")]) == 1
+        source = "study" if found and not PUBLIC_DEMO else "synthetic"
+    if source == "synthetic":
+        raw, origin = synthetic_table()
+        return derive_measures(raw), origin
+    path = DATA_FILE or default_data_file(DEFAULT_DATA_DIR)  # raises, saying how many .rds files it found
+    return derive_measures(_read_rds(path)), f"study file {path.name}"
 
 
 def _fmt(v, digits=1):

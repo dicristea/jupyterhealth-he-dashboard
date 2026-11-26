@@ -482,7 +482,7 @@ def test_public_demo_notebooks_tab_links_to_viewer_jupyterlite_and_binder(public
     nbs = app.test_client().get("/notebooks").data.decode()
     assert "Nothing runs on this server" in nbs and "not clinical findings" in nbs
     assert "https://github.com/dicristea/jupyterhealth-he-dashboard/blob/main/docs/synthetic-data.md" in nbs
-    for name in ["oura_data_exploration", "he_trajectories_phenotypes"]:
+    for name in ["synthetic_data_exploration", "he_trajectories_phenotypes"]:
         assert f'href="/notebooks/view/{name}"' in nbs
         assert (f'href="https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html'
                 f'?path=notebooks/{name}.ipynb"') in nbs
@@ -504,12 +504,17 @@ def test_public_demo_notebook_links_follow_env(public_demo):
     assert "dicristea" not in nbs
 
 
-def test_demo_notebook_list_matches_the_notebook_sources():
+def test_notebook_lists_match_the_notebook_sources():
     import app as app_module
     # The speech notebook is local-only (needs recordings and Praat; scripts/render_notebooks.NOT_RENDERED).
-    sources = sorted(p.stem for p in (Path(app_module.__file__).parent / "notebooks").glob("*.py")
-                     if p.stem != "speech_features_starter")
-    assert sorted(nb["name"] for nb in app_module.NOTEBOOKS) == sources
+    # The de-identified exploration exists only in the private repo (export-ignore), so it may be missing here.
+    sources = {p.stem for p in (Path(app_module.__file__).parent / "notebooks").glob("*.py")} - {"speech_features_starter"}
+    demo = {nb["name"] for nb in app_module.DEMO_NOTEBOOKS}
+    study = {nb["name"] for nb in app_module.STUDY_NOTEBOOKS}
+    assert demo <= sources and sources <= demo | study and study - sources <= {"deid_data_exploration"}
+    assert "deid_data_exploration" not in demo and "synthetic_data_exploration" not in study
+    attrs = (Path(app_module.__file__).parent / ".gitattributes").read_text()
+    assert "notebooks/deid_data_exploration.py export-ignore" in attrs and "CLAUDE.md export-ignore" in attrs
 
 
 def test_local_notebooks_tab_cards_and_other_notebooks(monkeypatch, tmp_path):
@@ -518,7 +523,10 @@ def test_local_notebooks_tab_cards_and_other_notebooks(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module, "JUPYTER_ROOT", tmp_path.parent)
     (tmp_path / "mine.ipynb").write_text("{}")
     nbs = app.test_client().get("/notebooks").data.decode()
-    for nb in app_module.NOTEBOOKS:
+    for nb in app_module.STUDY_NOTEBOOKS + app_module.DEMO_NOTEBOOKS:
+        if not (app_module.NOTEBOOK_SRC / f"{nb['name']}.py").exists():
+            assert nb["name"] not in nbs  # the private notebook, in the public repo
+            continue
         assert str(escape(nb["title"])) in nbs and f'href="/notebooks/code/{nb["name"]}"' in nbs
     assert f'href="/notebooks/open/{tmp_path.name}/mine.ipynb"' in nbs and "Your notebooks" in nbs
     assert "doesn't seem to be running" not in nbs and "jupyterNotice" not in nbs
@@ -549,7 +557,7 @@ def test_public_demo_notebooks_never_mention_the_study_file(public_demo):
     client = app.test_client()
     pages = [client.get("/notebooks").data.decode()]
     import app as app_module
-    for nb in app_module.NOTEBOOKS:
+    for nb in app_module.DEMO_NOTEBOOKS:
         pages.append(client.get(f"/notebooks/view/{nb['name']}").data.decode())
         pages.append((Path(app_module.__file__).parent / "notebooks" / f"{nb['name']}.py").read_text())
     for text in pages:

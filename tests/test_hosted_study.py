@@ -129,7 +129,7 @@ def test_pages_work_and_local_only_features_are_off(hosted):
     assert c.get("/ehr/launch?iss=https://example.org").status_code == 404
     nb = c.get("/notebooks").data
     assert b"mybinder.org" not in nb and b"github.io" not in nb and b"/notebooks/view/" not in nb
-    assert c.get("/notebooks/view/oura_data_exploration/page").status_code == 404
+    assert c.get("/notebooks/view/synthetic_data_exploration/page").status_code == 404
     assert b"Connect Medplum" not in c.get("/ehr").data
     cohort = c.get("/cohort").data
     assert b'"/lite/lab/index.html"' in cohort and b"mybinder.org" not in cohort
@@ -141,7 +141,7 @@ def test_notebooks_tab_links_this_sites_jupyterlite(hosted, monkeypatch, tmp_pat
     assert b"wasn't built" in c.get("/notebooks").data  # no Lite in this deployment: say so, no dead links
     (tmp_path / "index.html").write_text("lite")
     nb = c.get("/notebooks").data
-    for name in ("oura_data_exploration", "he_trajectories_phenotypes"):
+    for name in ("deid_data_exploration", "he_trajectories_phenotypes"):
         assert f"/lite/lab/index.html?path=notebooks/{name}.ipynb".encode() in nb
         assert f"/lite/files/notebooks/{name}.ipynb".encode() in nb
 

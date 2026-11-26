@@ -39,5 +39,5 @@ USER study
 # HE_HOSTED_STUDY is set here, not with ENV, so a host setting can't switch it off (or switch demo mode on).
 # The app refuses to start without DEMO_PASSWORD and HE_DATA_URL. Without --preload each worker would download
 # its own copy; with one worker and --preload the data is fetched once, before the port opens.
-# --timeout 180: the download plus deriving the measures for ~16k participant-days on Render's free 0.1 CPU.
+# --timeout 180: the download plus deriving the measures for the whole study file on Render's free 0.1 CPU.
 CMD exec env HE_HOSTED_STUDY=1 HE_PUBLIC_DEMO= gunicorn --bind "0.0.0.0:${PORT}" --workers 1 --threads 4 --timeout 180 --preload --access-logfile - app:app
