@@ -47,38 +47,46 @@
 </div>
 {% endfor %}
 {% else %}
-<p class="sub">Exploratory analyses behind this dashboard. They open in JupyterLab, where you can also chat with Jupyter AI.</p>
-
-<div class="notice" id="jupyterNotice" hidden>
-    JupyterLab doesn't seem to be running at <code>{{ jupyter_base }}</code>. Start it from this repo's folder:
-    <code>jupyter lab --port 8888</code>
+<p class="sub">Exploratory analyses behind this dashboard, on the data this dashboard is using. They open in JupyterLab on this computer, where you can also chat with Jupyter AI.</p>
+{% if lab_error %}<div class="notice">JupyterLab didn't start. Check <code>notebook_outputs/jupyterlab.log</code>, or start it yourself from this repo's folder with <code>jupyter lab</code>.</div>{% endif %}
+{% for nb in notebooks %}
+<div class="card nb-card">
+    <div class="nb-head">
+        <div class="nb-icon">ipynb</div>
+        <div>
+            <h2>{{ nb.title }}</h2>
+            <p class="hint">{{ nb.description }} <code>{{ nb.file }}</code> · updated {{ nb.modified }}</p>
+        </div>
+    </div>
+    <div class="nb-actions">
+        {% if nb.open_url %}<div><a class="btn primary" href="{{ nb.open_url }}" target="_blank">Open in JupyterLab</a><small>Refreshed from the <code>.py</code> (your outputs are kept); JupyterLab starts if needed</small></div>{% endif %}
+        <div><a class="btn" href="{{ nb.code_url }}">View code</a><small>Read-only source, no outputs</small></div>
+    </div>
 </div>
+{% endfor %}
 
+{% if other_notebooks %}
 <div class="card">
-    {% for nb in notebooks %}
+    <h2>Your notebooks</h2>
+    <p class="hint">Other notebooks in <code>notebooks/</code>, such as cohort exports.</p>
+    {% for nb in other_notebooks %}
     <div class="nb-row">
         <div class="nb-icon">ipynb</div>
         <div style="flex:1">
             <div class="nb-name">{{ nb.name }}</div>
             <div class="nb-meta">{{ nb.folder }}/{{ nb.file }} · updated {{ nb.modified }} · {{ nb.size_kb }} KB</div>
         </div>
-        {% if nb.url %}<a class="btn primary" href="{{ nb.url }}" target="_blank" rel="noopener">Open in JupyterLab</a>
+        {% if nb.open_url %}<a class="btn" href="{{ nb.open_url }}" target="_blank">Open in JupyterLab</a>
         {% else %}<span class="nb-meta">outside JupyterLab root</span>{% endif %}
     </div>
-    {% else %}
-    <p class="hint" style="margin:0">No notebooks yet. Notebooks are stored as <code>.py</code> files (no data, safe for Git). To create the runnable copies, run
-        <code>jupytext --to ipynb notebooks/*.py</code> in a terminal, then refresh this page.</p>
     {% endfor %}
 </div>
+{% endif %}
 
 <div class="card">
     <h2>Privacy</h2>
     <p class="hint" style="margin:0">Notebook <code>.ipynb</code> files contain outputs drawn from study data, so Git ignores them. Only the blank <code>.py</code> versions in <code>notebooks/</code> are committed.</p>
 </div>
-
-<script>
-fetch('{{ jupyter_base }}/api', {mode: 'no-cors'}).catch(() => { document.getElementById('jupyterNotice').hidden = false; });
-</script>
 {% endif %}
 {% include "_speech_card.html" %}
 {% endblock %}

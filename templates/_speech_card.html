@@ -9,6 +9,7 @@
     </div>
     <div class="nb-actions">
         <div><a class="btn primary" href="{{ url_for('notebook_code', name='speech_features_starter') }}">View code</a><small>Read-only, nothing runs</small></div>
+        {% if not public_demo and not hosted_study %}<div><a class="btn" href="/notebooks/open/notebooks/speech_features_starter.ipynb" target="_blank">Open in JupyterLab</a><small>Needs the recordings folder and Praat</small></div>{% endif %}
         <div><button type="button" class="btn" data-speech-open>Upload recordings</button><small>Not connected yet</small></div>
     </div>
 </div>

@@ -9,10 +9,10 @@
 # ---
 
 # %% [markdown]
-# # Getting to Know the De-identified Oura Dataset (HE Study)
+# # Getting to Know the HE Study Oura Dataset
 #
-# **What this notebook is for:** a beginner-friendly tour of the de-identified
-# HE study dataset. Each block of code has a plain-language note
+# **What this notebook is for:** a beginner-friendly tour of the HE study's
+# Oura dataset. Each block of code has a plain-language note
 # above it that says *what it does* and *why we care*.
 #
 # **What we want to learn:**
@@ -22,7 +22,7 @@
 # 4. Whether there is any menstrual-cycle information.
 # 5. What real sleep (the Oura sleep record) looks like, how complete it is, and
 #    how it differs between clinical groups (Steps 20–24, exploratory).
-# 6. The detailed activity and vitals views that moved off the patient page (Steps 25–26).
+# 6. Detailed activity and vitals views for research (Steps 25–26).
 # 7. Which parameters from the current Oura Clinical Workbench actually exist
 #    in the data, so the next dashboard only shows what we really have.
 #
@@ -30,7 +30,7 @@
 # each `# %%` block, or **Run All**. If VS Code asks for a kernel, pick your
 # Python environment. The `.ipynb` copy works the same way.
 #
-# > 🔒 **Privacy:** even de-identified data stays on your computer. Keep this
+# > 🔒 **Privacy:** study data stays on your computer. Keep this
 # > notebook and all of its outputs in your JupyterHealth folder. **Do not
 # > commit an `.ipynb` file with outputs to GitHub**, because the outputs
 # > contain the data. Only this blank `.py` version is safe to share.
@@ -41,9 +41,9 @@
 # Same switch as the dashboard: set **`HE_DATA_SOURCE`** before starting
 # Jupyter.
 #
-# * `auto` (default): the study data if `JH_DATA_DIR` is set or there is
-#   exactly one `.rds` in `../../de-identified data/`, otherwise the synthetic
-#   cohort.
+# * `auto` (default): the study file if `JH_DATA_DIR` is set or the
+#   dashboard's data folder (`data.DEFAULT_DATA_DIR`, outside the repo) holds
+#   exactly one `.rds`, otherwise the synthetic cohort.
 # * `study`: the study data folder only.
 # * `synthetic`: the synthetic cohort from the dashboard's `data.py`. No R, no
 #   study file.
@@ -61,18 +61,6 @@ from pathlib import Path
 DATA_SOURCE = os.environ.get("HE_DATA_SOURCE", "auto").strip().lower()
 if DATA_SOURCE not in {"auto", "study", "synthetic"}:
     raise ValueError("HE_DATA_SOURCE must be auto, study or synthetic")
-# In the password-protected study site's JupyterLite (in the browser), the data comes from the site itself.
-HOSTED_LITE = sys.platform == "emscripten" and any((p / "hosted_study.json").exists() for p in (Path.cwd(), *Path.cwd().parents))
-if HOSTED_LITE:
-    DATA_SOURCE = "study"
-elif DATA_SOURCE == "auto":
-    found_rds = sorted(Path("../../de-identified data").glob("*.rds"))
-    DATA_SOURCE = "study" if os.environ.get("JH_DATA_DIR") or len(found_rds) == 1 else "synthetic"
-SYNTHETIC = DATA_SOURCE == "synthetic"
-print("Data source:", DATA_SOURCE + (" (from the study site)" if HOSTED_LITE else ""))
-if SYNTHETIC:
-    print("⚠️  SYNTHETIC DATA. Every result below is an artefact of the generator settings "
-          "(docs/synthetic-data.md), not a clinical finding.")
 # The repo folder (it holds the dashboard's data.py), whether Jupyter started in notebooks/ or the repo.
 # data.py is the only code that opens the study .rds: its R step keeps clock times only (no calendar dates).
 REPO = next((p for p in (Path.cwd(), *Path.cwd().parents) if (p / "data.py").exists()), None)
@@ -80,6 +68,19 @@ if REPO is None:
     raise FileNotFoundError("Can't find the dashboard's data.py: run this notebook from the repo or its notebooks/ folder.")
 sys.path.insert(0, str(REPO))
 import data as he_data  # not "data": later cells use that name for a column of values
+
+# In the password-protected study site's JupyterLite (in the browser), the data comes from the site itself.
+HOSTED_LITE = sys.platform == "emscripten" and any((p / "hosted_study.json").exists() for p in (Path.cwd(), *Path.cwd().parents))
+if HOSTED_LITE:
+    DATA_SOURCE = "study"
+elif DATA_SOURCE == "auto":
+    found_rds = sorted(he_data.DEFAULT_DATA_DIR.glob("*.rds"))
+    DATA_SOURCE = "study" if os.environ.get("JH_DATA_DIR") or len(found_rds) == 1 else "synthetic"
+SYNTHETIC = DATA_SOURCE == "synthetic"
+print("Data source:", DATA_SOURCE + (" (from the study site)" if HOSTED_LITE else ""))
+if SYNTHETIC:
+    print("⚠️  SYNTHETIC DATA. Every result below is an artefact of the generator settings "
+          "(docs/synthetic-data.md), not a clinical finding.")
 
 # %% [markdown]
 # ## Step 0 · Tools we need
@@ -147,8 +148,8 @@ if SYNTHETIC or HOSTED_LITE:
     OUTPUT_DIR = REPO / "notebook_outputs"   # git-ignored, inside the repo (in JupyterLite: this browser only)
     OUTPUT_DIR.mkdir(exist_ok=True)
 else:
-    # Default: the "de-identified data" folder that sits next to the repo (JupyterHealth/de-identified data)
-    DATA_DIR = Path(os.environ.get("JH_DATA_DIR", "../../de-identified data")).expanduser().resolve()
+    # Default: the dashboard's data folder, next to the repo (data.DEFAULT_DATA_DIR)
+    DATA_DIR = Path(os.environ.get("JH_DATA_DIR", he_data.DEFAULT_DATA_DIR)).expanduser().resolve()
     # Where summary tables get saved. This is local only and lives next to your data, NOT in the repo.
     OUTPUT_DIR = DATA_DIR.parent / "exploration_outputs"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -339,11 +340,11 @@ ROLE_PATTERNS: dict[str, tuple[str, list[str]]] = {
 }
 
 COLUMN_OVERRIDES: dict[str, str] = {
-    # Study file: "name" is the de-identified participant ID, and there are
+    # Study file: "name" is the participant code, and there are
     # no calendar dates, only "days_since_start" (study day 0–180).
     "id": "name",
     "date": "days_since_start",
-    # The Nov 2026 file has look-alikes the keyword search would pick first:
+    # The current file has look-alikes the keyword search would pick first:
     "valid_day": "valid80",            # not valid90
     "rem": "rem_sleep_duration",       # seconds; rem_sleep_dur_pct is a 0–1 fraction
     "resp_rate": "average_breath",     # not breathing_disturbance_index
@@ -408,8 +409,7 @@ print("Participant-level table:", part_name)
 # older files started at 1) instead of real dates. That's good for privacy, but
 # it means we can't line days up across people by calendar, season or day of
 # the week. Where the notebook would use a date, it uses **study day** instead.
-# The Nov 2026 file no longer has a weekday/weekend column (`day_type`), so
-# Step 15 only runs on files that still have it.
+# Without a weekday/weekend column (`day_type`), Step 15 just says so.
 
 # %%
 day = tables[day_name].copy()
@@ -637,12 +637,11 @@ if sleep_col:
 # %% [markdown]
 # ## Step 8b · The 5-minute activity string (and the rest-based sleep proxy)
 #
-# **Update (Nov 2026 file):** the study file now has Oura's **real sleep
+# **Real sleep is in Steps 20–24.** The dataset has Oura's **sleep
 # record**, one per night: total sleep, awake time, latency, REM, the
 # 5-minute sleep-stage string (hypnogram) and bedtime/wake clock times. Those
-# are analysed in Steps 20–24. Older files had no sleep columns, so this step
-# built a sleep *proxy* from activity; it is kept for comparison and for days
-# with no sleep record.
+# are analysed in Steps 20–24. This step builds a sleep *proxy* from activity,
+# for comparison and for days with no sleep record.
 #
 # The file also has `class_5_min`, Oura's **activity class** for
 # every 5 minutes of the day (288 digits = 24 h):
@@ -790,7 +789,7 @@ if ROLES["efficiency"]:
     eff = pd.to_numeric(clean[ROLES["efficiency"]], errors="coerce")
     clean["efficiency_pct"] = eff * 100 if eff.median() <= 1 else eff
 elif {"total_sleep_h", "time_in_bed_h"} <= set(clean.columns):
-    # The Nov 2026 file has no Oura efficiency column: total sleep ÷ time in bed
+    # No Oura efficiency column: total sleep ÷ time in bed
     clean["efficiency_pct"] = 100 * clean["total_sleep_h"] / clean["time_in_bed_h"]
 
 # No deep/light columns either: their share of the asleep 5-minute slots in the hypnogram
@@ -1109,9 +1108,8 @@ person_sd.groupby("sex")[var_metrics].median().round(2).rename(columns=METRICS)
 # a dashboard should compare like-with-like (this Monday vs. last Monday)
 # rather than raw day-to-day changes.
 #
-# **Needs a weekday column or real dates.** The Nov 2026 study file has
-# neither (`day_type` was removed, and calendar dates can't leave the R step),
-# so on that file this step just says so. Synthetic data still has `day_type`.
+# **Needs a weekday column (`day_type`).** Calendar dates are never loaded,
+# so without that column this step just says so.
 
 # %%
 week_metrics = [c for c in ["total_sleep_h", "night_rest_h", "steps", "hrv"] if c in cols]
@@ -1146,12 +1144,12 @@ else:
 # Bedtime is a **circadian** marker. Late, drifting bedtimes may be a sign
 # of covert HE.
 #
-# **The de-identified study file (Nov 2026)** already did this in the R step:
+# **The loader already did this:**
 # `bedtime_start_h18` is the bedtime in **hours after 18:00 local** on the
 # evening before waking (5 = 23:00, 7 = 01:00), with no date. We use it
 # directly (Step 22 looks at it in more detail).
 #
-# **If there's no bedtime column at all** (older study files), we use
+# **If there's no bedtime column at all**, we use
 # the **rest onset** from Step 8b instead. The activity string is already in
 # local time (Oura's day starts at 4 am local), so no timezone fix is needed.
 
@@ -1199,9 +1197,8 @@ else:
 # 1 = deep, 2 = light, 3 = REM, 4 = awake, but other exports may differ.
 # The **sanity check** at the end recomputes REM % from the string and
 # compares it with the nightly REM % column. If they disagree a lot, the
-# code is wrong, so fix `HYPNOGRAM_CODES`. On the Nov 2026 file, aggregate
-# checks (slot counts vs. the total-sleep, REM and awake columns) agree with
-# the Oura coding; it is still listed as "to confirm with the study team".
+# code is wrong, so fix `HYPNOGRAM_CODES`. The coding is still listed as
+# "to confirm with the study team".
 #
 # A night is filed on its **wake day**: the row for study day *d* holds the
 # night that ended on the morning of day *d*.
@@ -1313,10 +1310,10 @@ if not any(ROLES[r] for r in clinical_roles + ["meld", "child_pugh"]):
     print("No clinical columns found in the loaded tables. They may be in a separate clinical file; check Step 2.")
 
 # %% [markdown]
-# # Real sleep from the Oura sleep record (Nov 2026 file)
+# # Real sleep from the Oura sleep record
 #
 # Everything above works on any version of the file. From here on we use the
-# **Oura sleep record** that the Nov 2026 file added: one record per day,
+# **Oura sleep record**: one record per day,
 # filed on the **wake day** (the row for study day *d* is the night that ended
 # on the morning of day *d*).
 #
@@ -1693,11 +1690,11 @@ if HAVE_SLEEP and HAVE_STATSMODELS and "Decompensation" in GROUPINGS:
     display(pd.DataFrame(model_rows))
 
 # %% [markdown]
-# # Research views moved off the patient page
+# # Research views
 #
-# The clinic page now shows one sleep-timing chart. The detailed activity
-# views it used to show live here, for one person at a time (`PERSON`, set in
-# Step 13: change it to look at someone else).
+# Detailed views for one person at a time (`PERSON`, set in Step 13: change
+# it to look at someone else). The dashboard's patient page shows simpler
+# versions of the actogram and 24-hour profile.
 #
 # ## Step 25 · Actogram, 24-hour activity profile and intraday MET
 #
@@ -1794,7 +1791,7 @@ else:
 # %% [markdown]
 # ## Step 26 · HRV, heart rate, SpO₂ and rest regularity (SRI) over time
 #
-# These were tiles on the patient page and are now research views. HRV,
+# On the patient page these sit under "More measures". HRV,
 # average heart rate and SpO₂ are Oura's **nightly** values (they're missing
 # when there's no sleep record; SpO₂ is missing on most nights). **Rest
 # regularity (SRI)** compares each pair of consecutive days slot by slot

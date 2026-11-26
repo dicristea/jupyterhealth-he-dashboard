@@ -13,9 +13,8 @@
 #
 # **What this notebook is for:** the original goal was to plot Oura measures
 # **before and after clinical events** (for example decompensation). This
-# notebook explains why that still isn't possible (the Nov 2026 file added
-# real sleep, but still no event dates), then does the two analyses we *can*
-# do now:
+# notebook explains why that isn't possible yet (the dataset has nightly
+# sleep but no event dates), then does the two analyses we *can* do now:
 #
 # 1. **Trajectories (population level).** How do groups of patients (for
 #    example decompensated vs. compensated) look across their 180 study days?
@@ -23,7 +22,7 @@
 #    recognisable "types" based on their own Oura patterns, and do those types
 #    line up with their clinical labels?
 #
-# It builds on `deid_oura_data_exploration`: same data file, same loader,
+# It builds on `oura_data_exploration`: same data file, same loader,
 # the same **main-night** sleep measures (its Step 20) and the activity-based
 # **night rest bout** proxy for files without a sleep record.
 #
@@ -37,9 +36,9 @@
 # Same switch as the dashboard: set **`HE_DATA_SOURCE`** before starting
 # Jupyter.
 #
-# * `auto` (default): the study file if there is exactly one `.rds` in
-#   `../../de-identified data/` (or `JH_DATA_FILE` is set), otherwise the
-#   synthetic cohort.
+# * `auto` (default): the study file if `JH_DATA_FILE` is set or the
+#   dashboard's data folder (`data.DEFAULT_DATA_DIR`, outside the repo) holds
+#   exactly one `.rds`, otherwise the synthetic cohort.
 # * `study`: the study file only.
 # * `synthetic`: the synthetic cohort from the dashboard's `data.py`. No R, no
 #   study file.
@@ -57,18 +56,6 @@ from pathlib import Path
 DATA_SOURCE = os.environ.get("HE_DATA_SOURCE", "auto").strip().lower()
 if DATA_SOURCE not in {"auto", "study", "synthetic"}:
     raise ValueError("HE_DATA_SOURCE must be auto, study or synthetic")
-# In the password-protected study site's JupyterLite (in the browser), the data comes from the site itself.
-HOSTED_LITE = sys.platform == "emscripten" and any((p / "hosted_study.json").exists() for p in (Path.cwd(), *Path.cwd().parents))
-if HOSTED_LITE:
-    DATA_SOURCE = "study"
-elif DATA_SOURCE == "auto":
-    found_rds = sorted(Path("../../de-identified data").glob("*.rds"))
-    DATA_SOURCE = "study" if os.environ.get("JH_DATA_FILE") or len(found_rds) == 1 else "synthetic"
-SYNTHETIC = DATA_SOURCE == "synthetic"
-print("Data source:", DATA_SOURCE + (" (from the study site)" if HOSTED_LITE else ""))
-if SYNTHETIC:
-    print("⚠️  SYNTHETIC DATA. Every result below is an artefact of the generator settings "
-          "(docs/synthetic-data.md), not a clinical finding.")
 # The repo folder (it holds the dashboard's data.py), whether Jupyter started in notebooks/ or the repo.
 # data.py is the only code that opens the study .rds: its R step keeps clock times only (no calendar dates).
 REPO = next((p for p in (Path.cwd(), *Path.cwd().parents) if (p / "data.py").exists()), None)
@@ -76,6 +63,19 @@ if REPO is None:
     raise FileNotFoundError("Can't find the dashboard's data.py: run this notebook from the repo or its notebooks/ folder.")
 sys.path.insert(0, str(REPO))
 import data as he_data
+
+# In the password-protected study site's JupyterLite (in the browser), the data comes from the site itself.
+HOSTED_LITE = sys.platform == "emscripten" and any((p / "hosted_study.json").exists() for p in (Path.cwd(), *Path.cwd().parents))
+if HOSTED_LITE:
+    DATA_SOURCE = "study"
+elif DATA_SOURCE == "auto":
+    found_rds = sorted(he_data.DEFAULT_DATA_DIR.glob("*.rds"))
+    DATA_SOURCE = "study" if os.environ.get("JH_DATA_FILE") or len(found_rds) == 1 else "synthetic"
+SYNTHETIC = DATA_SOURCE == "synthetic"
+print("Data source:", DATA_SOURCE + (" (from the study site)" if HOSTED_LITE else ""))
+if SYNTHETIC:
+    print("⚠️  SYNTHETIC DATA. Every result below is an artefact of the generator settings "
+          "(docs/synthetic-data.md), not a clinical finding.")
 
 # %% [markdown]
 # ## Part 1 · Why "before and after clinical events" isn't possible yet
@@ -85,28 +85,28 @@ import data as he_data
 # change, then compare the weeks before vs. after. That needs **when** each
 # event happened.
 #
-# **What the de-identified study file has:**
+# **What the dataset has:**
 #
 # | Need | In the file? |
 # |---|---|
 # | Event **dates** (decompensation, HE episode, hospitalisation, med change) | ❌ No. `decomp`, `anyhe`, `anyOHE`, `ascites`, `he_meds`… are **one value per person**, measured at enrollment and copied onto every day. The check below confirms none of them ever changes within a person. |
 # | A real calendar | ❌ No, by design (HIPAA Safe Harbor). Only `days_since_start` (study day 0–180). We don't know what day 0 is (enrollment? ring activation?). |
-# | Sleep data (stages, total sleep, bedtime) | ✅ Yes, since the Nov 2026 file: one Oura sleep record per night (total sleep, awake time, latency, REM, the 5-minute hypnogram, and bedtime/wake as **clock times only**). Used below. Older files only had the activity string, turned into a sleep *proxy*. |
+# | Sleep data (stages, total sleep, bedtime) | ✅ Yes: one Oura sleep record per night (total sleep, awake time, latency, REM, the 5-minute hypnogram, and bedtime/wake as **clock times only**). Used below. |
 # | Repeated labs (MELD, bilirubin, albumin, INR over time) | ❌ No. Labs, MELD and Child-Pugh are at enrollment only. |
 # | Resting HR, temperature deviation | ❌ No. Only daily *average* HR. |
 #
 # **Where event data could come from:**
 #
 # 1. **A clinician-provided event table**, keyed by `name` + `days_since_start`,
-#    with columns such as event type and study day. That keeps the data
-#    de-identified (no calendar dates) and drops straight into Part 4.
+#    with columns such as event type and study day. That needs no calendar
+#    dates and drops straight into Part 4.
 # 2. **The EHR.** Admissions, paracentesis (ascites), variceal bleeds, HE
 #    admissions, lactulose/rifaximin start and stop dates, and repeated MELD
 #    labs all live there. A **SMART on FHIR** app launched from the patient's
 #    chart only needs the **MRN** to match wearable data held outside the EHR
 #    (for example in JupyterHealth Exchange). This needs the appropriate
 #    ethics approval and authentication.
-# 3. **More complete Oura data.** The Nov 2026 file has the nightly sleep
+# 3. **More complete Oura data.** The dataset has the nightly sleep
 #    record; a full Oura export would add temperature deviation, lowest HR,
 #    raw HR/HRV files and every sleep period of the day (the file keeps one
 #    per day, so daytime naps are missing). The Oura API
@@ -124,9 +124,9 @@ import data as he_data
 # Same loader as the dashboard and the exploration notebook (`data.py`): R
 # converts the `.rds` file to a CSV once (cached outside the repo as
 # `*.v3.csv`), keeping bedtimes as **clock times only** and refusing to write
-# any calendar date. By default it uses the single `.rds` file in
-# `../../de-identified data/`; set **`JH_DATA_FILE`** (or `HE_DATA_FILE`) if
-# your copy lives somewhere else.
+# any calendar date. By default it uses the single `.rds` file in the
+# dashboard's data folder; set **`JH_DATA_FILE`** (or `HE_DATA_FILE`) if your
+# copy lives somewhere else.
 #
 # On synthetic data the table comes from the dashboard's `data.py` instead
 # (`synthetic_data/synthetic_he.csv.gz` if you generated one, otherwise the
@@ -159,7 +159,7 @@ if SYNTHETIC or HOSTED_LITE:
 else:
     if os.environ.get("JH_DATA_FILE"):
         DATA_FILE = Path(os.environ["JH_DATA_FILE"])
-    else:  # HE_DATA_FILE, or the single .rds in ../de-identified data/ (data.py raises if there are none or several)
+    else:  # HE_DATA_FILE, or the single .rds in data.DEFAULT_DATA_DIR (data.py raises if there are none or several)
         DATA_FILE = he_data.DATA_FILE or he_data.default_data_file()
     DATA_FILE = DATA_FILE.expanduser().resolve()
     OUTPUT_DIR = DATA_FILE.parent.parent / "exploration_outputs"   # outside the repo
@@ -178,7 +178,7 @@ else:
 # -999 → missing, `ascites` from current/previous ascites, one row per person-day (the valid-wear copy wins)
 df = he_data.harmonise_columns(raw.copy()).sort_values(["name", "days_since_start"], kind="stable").reset_index(drop=True)
 del raw
-DAY0 = he_data.first_day(df)  # 0 in the Nov 2026 file, 1 in older ones
+DAY0 = he_data.first_day(df)  # the first study day (0 or 1, depending on the file)
 print(f"{df['name'].nunique()} participants, {len(df):,} participant-days")
 
 # %% [markdown]
@@ -223,7 +223,7 @@ changes
 # Night rest and SRI use the dashboard's own functions (`_night_rest`, `_sri`
 # in `data.py`), so the numbers match the app.
 #
-# **Sleep measures** (from the Oura sleep record, Nov 2026 file): computed on
+# **Sleep measures** (from the Oura sleep record): computed on
 # **main nights** only (`long_sleep`, 3–16 h in bed, 1–14 h asleep, hypnogram
 # length matching time in bed), the same rule as the exploration notebook's
 # Step 20. Not limited to `valid80` days. Bedtime and midpoint are in **hours
@@ -306,7 +306,7 @@ print(f"{int(valid_day.sum()):,} valid days. Median night rest {valid['night_res
 # %% [markdown]
 # ## Part 3 · Trajectories: how do groups look over the 180 study days?
 #
-# With the Nov 2026 file each grouping gets two rows of charts: **real sleep**
+# Each grouping gets two rows of charts: **real sleep**
 # (total sleep, efficiency, WASO, sleep midpoint; main nights) and the
 # **activity-based** measures. A sleep midpoint of 9 means 03:00.
 #
@@ -517,11 +517,11 @@ else:
 # *"individual phenotype identification"* approach.
 #
 # **The numbers per person:**
-# * with the Oura sleep record (Nov 2026 file), from **main nights**: typical
+# * with the Oura sleep record, from **main nights**: typical
 #   total sleep (median) and how much it varies (SD), sleep efficiency, and the
 #   sleep midpoint (circadian timing) with its night-to-night spread. People
 #   need at least **14 main nights**.
-# * without it (older files), the activity-based proxies instead: night rest
+# * without it, the activity-based proxies instead: night rest
 #   and rest midpoint, median and SD.
 # * from valid days: rest regularity (median SRI), HRV, average HR and steps
 #   (medians). People need at least **30 valid days**.
@@ -652,7 +652,7 @@ pd.DataFrame(label_rows).drop(columns="p (raw)", errors="ignore")
 # %%
 lines = [
     "**Trajectories & phenotypes: SYNTHETIC cohort. Generator artefacts, not clinical findings "
-    "(docs/synthetic-data.md)**" if SYNTHETIC else "**Trajectories & phenotypes: HE study, de-identified file**",
+    "(docs/synthetic-data.md)**" if SYNTHETIC else "**Trajectories & phenotypes: HE study data**",
     f"- Clinical columns are baseline-only: {int((changes['people whose value changes over time'] == 0).sum())}"
     f"/{len(changes)} never change within a person, so pre/post-event plots need an event table "
     "(name + study day) from the study team or the EHR.",

@@ -77,6 +77,8 @@ table.list td.id { font-weight: 600; color: var(--ink); }
 .cp-empty { font-size: 12px; color: var(--faint); margin-bottom: 10px; }
 .cp-missing { font-size: 11px; color: var(--muted); margin: 2px 0 8px; }
 .cp-study { font-size: 11px; color: var(--faint); }
+.cp-recorded { margin-bottom: 8px; }
+.cp-note { font-size: 11px; color: var(--faint); margin: 4px 0 0; }
 .cp-section { border-top: 1px solid var(--soft); }
 .cp-section > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     padding: 10px 2px; font-size: 13px; font-weight: 600; color: var(--ink); border-radius: 6px; }

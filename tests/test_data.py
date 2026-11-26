@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+from markupsafe import escape
 import pytest
 
 os.environ["HE_DATA_FILE"] = "/nonexistent/no-data-here.rds"  # force the synthetic cohort
@@ -165,13 +166,18 @@ def test_patient_profile_and_intraday():
     assert [t["key"] for t in d["tiles"]] == data.PATIENT_TILES
     assert [t["key"] for t in d["more_tiles"]] == data.MORE_TILES
     assert all({"spark", "band", "trend", "n_obs", "pill", "tone", "why"} <= set(t) for t in d["tiles"] + d["more_tiles"])
-    assert {"profile", "time_in_class", "actogram"}.isdisjoint(d)  # research views moved to the notebooks
+    a = d["activity"]  # the Activity section: 24-hour profile, time per class, actogram
+    assert len(a["hours"]) == data.SLOTS and len(a["met"]["p50"]) == data.SLOTS and len(a["rest_share"]) == data.SLOTS
+    assert [c["label"] for c in a["classes"]] == data.ACTIVITY_CLASSES
+    assert [r["day"] for r in a["actogram"]] == d["days"][-data.ACTOGRAM_DAYS:]
+    assert all(r["cls"] == "" or len(r["cls"]) == data.SLOTS for r in a["actogram"])
     assert len(d["nights"]) == data.TIMING_NIGHTS and [n["day"] for n in d["nights"]] == d["days"][-30:]
     client = app.test_client()
     body = client.get(f"/patient/{pid}").data
     assert b"Synthetic \xc2\xb7 de-identified demo" in body
     assert b'id="timing"' in body and b'id="moreMeasures"' in body and b"not validated for diagnosing HE" in body
-    assert b"Activity explorer" not in body and b'id="actogram"' not in body
+    assert b'id="actogram"' in body and b'id="profile"' in body and b"Activity explorer" not in body
+    assert b"prompt a conversation" not in body and b"no calendar dates" not in body
     # The intraday API stays (notebooks and research use), though the profile no longer shows it.
     i = client.get(f"/api/patient/{pid}/intraday?start=2&days=3").get_json()
     assert [x["day"] for x in i["days"]] == [2, 3, 4] and len(i["days"][0]["met"]) == 288
@@ -243,7 +249,7 @@ def test_clinical_snapshot_on_synthetic_patient():
     d = data.patient_detail(pid)
     c = d["clinical"]
     groups = [g["group"] for g in c["groups"]]
-    assert groups == ["Liver severity", "Decompensation", "Encephalopathy", "Other medication"]  # in order; no LFI
+    assert groups == ["Liver severity", "Decompensation", "Encephalopathy"]  # in order; no LFI
     assert all(f["value"] is not None for g in c["groups"] for f in g["fields"])  # no "—" grids
     assert c["not_recorded"] == ["Liver Frailty Index"]  # the generator leaves it empty
     assert [f["label"] for f in c["study"]] == ["Site", "Arm", "Etiology"]
@@ -260,8 +266,7 @@ def test_clinical_snapshot_hides_empty_fields_and_lists_them_once():
     c = data.clinical_snapshot(row, list(row.index))
     assert [g["group"] for g in c["groups"]] == ["Liver severity", "Decompensation"]  # Frailty: nothing to show
     assert c["groups"][0]["fields"] == [{"label": "MELD", "value": 14}, {"label": "Child-Pugh", "value": "8, class B"}]
-    assert c["groups"][1]["fields"] == [{"label": "Decompensated", "value": "Yes"},
-                                        {"label": "Ascites medication", "value": "Yes"}]
+    assert c["groups"][1]["fields"] == [{"label": "Decompensated", "value": "Yes"}]  # medication: own dropdown
     assert c["not_recorded"] == ["Bilirubin (mg/dL)", "Liver Frailty Index"]  # present but empty; absent columns skipped
     assert c["study"] == [{"label": "Site", "value": "WCM"}]
     assert data.clinical_snapshot(row, []) == {"groups": [], "study": [], "not_recorded": []}
@@ -290,7 +295,8 @@ def test_snapshot_has_three_dropdowns_with_synthetic_rows():
         assert f"<summary>{title}" in page
     assert '<details class="cp-section" id="cpStatus" open>' in page
     assert '<details class="cp-section" id="cpMedications">' in page and '<details class="cp-section" id="cpHistory">' in page
-    assert page.count('<span class="cp-tag">Synthetic</span>') == 2
+    assert '<span class="cp-tag">Synthetic list</span>' in page or '<span class="cp-tag">Synthetic events</span>' in page
+    assert "Beta-blocker" in page and "Overt HE" in page  # enrollment fields in the dropdowns
     assert "Labs, medications over time" not in page
 
 
@@ -318,8 +324,14 @@ def test_synthetic_extras_deterministic_and_consistent_with_baseline():
 
 
 def test_snapshot_extras_never_generated_for_study_data():
-    row = pd.Series({"he_meds": "Yes", "ascites": 1.0, "decomp": 1.0})
-    assert data.snapshot_extras("010", row, 180, "study") == {"synthetic": False, "medications": None, "history": None}
+    row = pd.Series({"he_meds": "Yes", "ascites": 1.0, "decomp": 1.0, "bb_use_t0": "Yes",
+                     "medication_for_hepatic_enc": float("nan"), "previous_ascites": "No"})
+    x = data.snapshot_extras("010", row, 180, "study", row.index)
+    assert not x["synthetic"] and x["medications"] == [] and x["history"] == []  # no generated rows
+    assert x["med_fields"] == [{"label": "Beta-blocker", "value": "Yes"}] and x["med_missing"] == ["HE medication"]
+    assert x["history_fields"] == [{"label": "Ascites", "value": "No"}] and x["show_medications"] and x["show_history"]
+    empty = data.snapshot_extras("010", row, 180, "study", [])
+    assert not empty["show_medications"] and not empty["show_history"]
 
 
 def test_synthetic_same_seed_same_output():
@@ -470,7 +482,7 @@ def test_public_demo_notebooks_tab_links_to_viewer_jupyterlite_and_binder(public
     nbs = app.test_client().get("/notebooks").data.decode()
     assert "Nothing runs on this server" in nbs and "not clinical findings" in nbs
     assert "https://github.com/dicristea/jupyterhealth-he-dashboard/blob/main/docs/synthetic-data.md" in nbs
-    for name in ["deid_oura_data_exploration", "he_trajectories_phenotypes"]:
+    for name in ["oura_data_exploration", "he_trajectories_phenotypes"]:
         assert f'href="/notebooks/view/{name}"' in nbs
         assert (f'href="https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html'
                 f'?path=notebooks/{name}.ipynb"') in nbs
@@ -497,17 +509,51 @@ def test_demo_notebook_list_matches_the_notebook_sources():
     # The speech notebook is local-only (needs recordings and Praat; scripts/render_notebooks.NOT_RENDERED).
     sources = sorted(p.stem for p in (Path(app_module.__file__).parent / "notebooks").glob("*.py")
                      if p.stem != "speech_features_starter")
-    assert sorted(nb["name"] for nb in app_module.DEMO_NOTEBOOKS) == sources
+    assert sorted(nb["name"] for nb in app_module.NOTEBOOKS) == sources
 
 
-def test_local_notebooks_tab_is_unchanged(monkeypatch, tmp_path):
+def test_local_notebooks_tab_cards_and_other_notebooks(monkeypatch, tmp_path):
     import app as app_module
     monkeypatch.setattr(app_module, "NOTEBOOK_DIRS", [tmp_path])
     monkeypatch.setattr(app_module, "JUPYTER_ROOT", tmp_path.parent)
     (tmp_path / "mine.ipynb").write_text("{}")
     nbs = app.test_client().get("/notebooks").data.decode()
-    assert f"{app_module.JUPYTER_BASE_URL}/lab/tree/{tmp_path.name}/mine.ipynb" in nbs and "Open in JupyterLab" in nbs
+    for nb in app_module.NOTEBOOKS:
+        assert str(escape(nb["title"])) in nbs and f'href="/notebooks/code/{nb["name"]}"' in nbs
+    assert f'href="/notebooks/open/{tmp_path.name}/mine.ipynb"' in nbs and "Your notebooks" in nbs
+    assert "doesn't seem to be running" not in nbs and "jupyterNotice" not in nbs
     assert "mybinder.org" not in nbs and "Run in your browser" not in nbs and "/notebooks/view/" not in nbs
+
+
+def test_notebook_open_refreshes_ipynb_and_starts_lab(monkeypatch, tmp_path):
+    import app as app_module
+    src_dir = tmp_path / "notebooks"
+    src_dir.mkdir()
+    (src_dir / "demo_nb.py").write_text("# %% [markdown]\n# # Hi\n\n# %%\nx = 1\n")
+    monkeypatch.setattr(app_module, "NOTEBOOK_SRC", src_dir)
+    monkeypatch.setattr(app_module, "JUPYTER_ROOT", tmp_path)
+    monkeypatch.setattr(app_module, "_ensure_lab", lambda: "tok")
+    client = app.test_client()
+    res = client.get("/notebooks/open/notebooks/demo_nb.ipynb")
+    assert res.status_code == 302 and res.headers["Location"] == \
+        f"{app_module.JUPYTER_BASE_URL}/lab/tree/notebooks/demo_nb.ipynb?token=tok"
+    assert (src_dir / "demo_nb.ipynb").is_file()  # made from the .py
+    assert client.get("/notebooks/open/notebooks/demo_nb.ipynb", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+    assert client.get("/notebooks/open/../etc.ipynb").status_code == 404
+    assert client.get("/notebooks/open/notebooks/demo_nb.py").status_code == 404
+    monkeypatch.setattr(app_module, "_ensure_lab", lambda: None)
+    assert "lab_error=1" in client.get("/notebooks/open/notebooks/demo_nb.ipynb").headers["Location"]
+
+
+def test_public_demo_notebooks_never_mention_the_study_file(public_demo):
+    client = app.test_client()
+    pages = [client.get("/notebooks").data.decode()]
+    import app as app_module
+    for nb in app_module.NOTEBOOKS:
+        pages.append(client.get(f"/notebooks/view/{nb['name']}").data.decode())
+        pages.append((Path(app_module.__file__).parent / "notebooks" / f"{nb['name']}.py").read_text())
+    for text in pages:
+        assert "de-identified" not in text.lower() and "deid" not in text.lower() and "Nov 2026" not in text
 
 
 def test_local_default_is_not_demo():

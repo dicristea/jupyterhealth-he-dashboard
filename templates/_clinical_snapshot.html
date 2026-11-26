@@ -1,5 +1,6 @@
 {# Clinical snapshot side panel. "At enrollment" = baseline fields (data.clinical_snapshot: empty fields hidden, listed
-   once as "Not recorded"). Medications and Clinical history = illustrative rows, synthetic data only (data.snapshot_extras). #}
+   once as "Not recorded"). Medications and Clinical history = enrollment fields on any data, plus illustrative dated
+   rows on synthetic data only (data.snapshot_extras). #}
 {% set x = p.extras %}
 {% set c = p.clinical %}
 <aside class="clinical-panel" id="clinicalSnapshot" aria-labelledby="clinicalTitle">
@@ -33,24 +34,32 @@
         </div>
     </details>
 
-{% if x.synthetic %}
+{% macro recorded(fields, missing) %}
+        {% if fields %}<div class="cp-grid cp-recorded">
+            {% for f in fields %}<div class="cp-cell" title="{{ f.label }}"><div class="cp-lbl">{{ f.label }}</div><div class="cp-val">{{ f.value }}</div></div>{% endfor %}
+        </div>{% endif %}
+        {% if missing %}<p class="cp-missing">Not recorded: {{ missing | join(', ') }}</p>{% endif %}
+{% endmacro %}
+{% if x.show_medications %}
     <details class="cp-section" id="cpMedications">
-        <summary>{{ sections.medications }}{% if x.synthetic %} <span class="cp-tag">Synthetic</span>{% endif %}</summary>
+        <summary>{{ sections.medications }} <span class="cp-sub">At enrollment</span>{% if x.medications %} <span class="cp-tag">Synthetic list</span>{% endif %}</summary>
         <div class="cp-section-body">
+        {{ recorded(x.med_fields, x.med_missing) }}
         {% for m in x.medications %}
         <div class="cp-med">
             <div class="cp-med-name">{{ m.name }} <span>{{ m.dose }}</span></div>
             <div class="cp-lbl">{{ m.freq }} · {{ m.since }}</div>
         </div>
-        {% else %}
-        <p class="cp-empty">No medications listed.</p>
         {% endfor %}
+        {% if not x.synthetic %}<p class="cp-note">Recorded once at enrollment. The study file has no medication names, doses or changes.</p>{% endif %}
         </div>
     </details>
-
+{% endif %}
+{% if x.show_history %}
     <details class="cp-section" id="cpHistory">
-        <summary>{{ sections.history }}{% if x.synthetic %} <span class="cp-tag">Synthetic</span>{% endif %}</summary>
+        <summary>{{ sections.history }} <span class="cp-sub">Before enrollment</span>{% if x.history %} <span class="cp-tag">Synthetic events</span>{% endif %}</summary>
         <div class="cp-section-body">
+        {{ recorded(x.history_fields, x.history_missing) }}
         {% for e in x.history %}
         <div class="cp-item">
             <div class="cp-left"><div class="cp-dot{% if e.kind == 'Hospitalization' %} accent{% endif %}"></div><div class="cp-spine"></div></div>
@@ -59,9 +68,8 @@
                 <div class="cp-lbl">{{ e.kind }} · {{ e.detail }}</div>
             </div>
         </div>
-        {% else %}
-        <p class="cp-empty">No events in this period.</p>
         {% endfor %}
+        {% if not x.synthetic %}<p class="cp-note">Ever before enrollment, as recorded at enrollment. The study file has no event dates.</p>{% endif %}
         </div>
     </details>
 {% endif %}

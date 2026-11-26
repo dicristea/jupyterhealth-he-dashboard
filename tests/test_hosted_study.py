@@ -111,13 +111,13 @@ def test_fails_closed_without_password_at_request_time(hosted, monkeypatch):
     assert app_module.app.test_client().get("/").status_code == 503
 
 
-def test_snapshot_on_study_data_hides_medications_and_history(hosted):
+def test_snapshot_on_study_data_shows_enrollment_medications_and_history(hosted):
     pid = data.patient_list()[0]["id"]
     assert data.load()[1] == "study"
     page = _client().get(f"/patient/{pid}").data.decode()
     assert f"<summary>{data.SNAPSHOT_SECTIONS['status']}" in page
-    assert 'id="cpMedications"' not in page and 'id="cpHistory"' not in page  # the study file has neither
-    assert "cp-tag" not in page and "cp-med" not in page and "Lactulose" not in page
+    assert 'id="cpMedications"' in page and 'id="cpHistory"' in page  # from the enrollment fields
+    assert "cp-tag" not in page and 'class="cp-med"' not in page and "Lactulose" not in page  # no generated rows
 
 
 def test_pages_work_and_local_only_features_are_off(hosted):
@@ -129,7 +129,7 @@ def test_pages_work_and_local_only_features_are_off(hosted):
     assert c.get("/ehr/launch?iss=https://example.org").status_code == 404
     nb = c.get("/notebooks").data
     assert b"mybinder.org" not in nb and b"github.io" not in nb and b"/notebooks/view/" not in nb
-    assert c.get("/notebooks/view/deid_oura_data_exploration/page").status_code == 404
+    assert c.get("/notebooks/view/oura_data_exploration/page").status_code == 404
     assert b"Connect Medplum" not in c.get("/ehr").data
     cohort = c.get("/cohort").data
     assert b'"/lite/lab/index.html"' in cohort and b"mybinder.org" not in cohort
@@ -141,7 +141,7 @@ def test_notebooks_tab_links_this_sites_jupyterlite(hosted, monkeypatch, tmp_pat
     assert b"wasn't built" in c.get("/notebooks").data  # no Lite in this deployment: say so, no dead links
     (tmp_path / "index.html").write_text("lite")
     nb = c.get("/notebooks").data
-    for name in ("deid_oura_data_exploration", "he_trajectories_phenotypes"):
+    for name in ("oura_data_exploration", "he_trajectories_phenotypes"):
         assert f"/lite/lab/index.html?path=notebooks/{name}.ipynb".encode() in nb
         assert f"/lite/files/notebooks/{name}.ipynb".encode() in nb
 

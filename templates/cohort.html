@@ -53,7 +53,7 @@
         </select>
     </label>
 </div>
-<p class="hint controls-note">Clinical groups are recorded once at enrollment, so this page shows baseline differences, never worsening. <span id="groupHint"></span></p>
+<p class="hint controls-note" id="groupHint"></p>
 
 <div class="two-col">
     <div class="card">
@@ -75,7 +75,8 @@
 
 <div class="card">
     <h2>About these measures</h2>
-    <p class="hint" style="margin:0"><strong>Sleep</strong> measures come from Oura's nightly sleep record and use only the <strong>main night</strong> (the long sleep record with 3–16 h in bed and 1–14 h asleep); <strong>heart rate, HRV and SpO₂</strong> are Oura's overnight values from the same main nights. Bedtime variability is each night's 2-week bedtime SD, so a patient's value is their typical 2-week bedtime SD. <strong>Steps</strong>, <strong>rest regularity</strong>, <strong>night rest</strong> and <strong>rest midpoint</strong> use days with ≥80% ring wear; the last three are estimates from Oura's 5-minute activity classes. A patient counts with at least 14 nights (or valid days) of a measure. Missing nights are never counted as zero. Clinical labels were recorded once at enrollment and there are no clinical event dates. See the <a href="/notebooks">trajectories notebook</a> for the full method.</p>
+    <p class="hint" style="margin:0 0 6px">Clinical groups are recorded once at enrollment, so this page shows baseline differences, not worsening.</p>
+    <p class="hint" style="margin:0"><strong>Sleep</strong>, heart rate, HRV and SpO₂ use each patient's main nights (long sleep record, 3–16 h in bed); steps and the rest measures use days with ≥80% ring wear. A patient counts with at least 14 nights or days of a measure, and missing nights are never counted as zero. Full method: the <a href="/notebooks">trajectories notebook</a>.</p>
 </div>
 
 <script>
@@ -94,10 +95,12 @@
         const d = await res.json();
         document.getElementById('groupHint').textContent = HINTS[groupEl.value] || '';
         const fmt = d.metric.unit === 'clock' ? clock : (v => +v.toFixed(d.metric.digits === 0 ? 0 : 1));
+        const yTitle = d.metric.label + (d.metric.unit && d.metric.unit !== 'clock' ? ` (${d.metric.unit})` : '');
+        const xGroup = groupEl.selectedOptions[0] ? groupEl.selectedOptions[0].text : '';
         const weeks = [...new Set(d.levels.flatMap(l => l.weeks))].sort((a, b) => a - b);
         const align = (l, key) => weeks.map(w => { const i = l.weeks.indexOf(w); return i < 0 ? null : l[key][i]; });
         Charts.lineChart(document.getElementById('traj'), {
-            x: weeks.length ? weeks : [1], xLabel: 'study week', height: 260, yFormat: fmt,
+            x: weeks.length ? weeks : [1], xLabel: 'Study week', yLabel: yTitle, height: 260, yFormat: fmt,
             series: d.levels.map((l, i) => ({y: align(l, 'median'), color: COLORS[i], width: 2.5})),
             bands: d.levels.map((l, i) => ({lo: align(l, 'q1'), hi: align(l, 'q3'), color: COLORS[i]})),
         });
@@ -108,7 +111,7 @@
             ? `${d.excluded} ${d.excluded === 1 ? 'person' : 'people'} left out (fewer than ${d.min_person} ${d.noun})` : '';
         document.getElementById('stripHint').textContent = `Each patient's median over their ${d.basis}.`;
         Charts.stripChart(document.getElementById('strip'),
-            d.levels.map((l, i) => ({name: l.name, color: COLORS[i], values: l.people})), {height: 260, yFormat: fmt});
+            d.levels.map((l, i) => ({name: l.name, color: COLORS[i], values: l.people})), {height: 260, yFormat: fmt, xLabel: xGroup, yLabel: yTitle});
         const unit = d.metric.unit === 'clock' ? '' : ' ' + d.metric.unit;
         let txt = d.levels.map(l => `${l.name}: median <strong>${l.overall_median === null ? '—' : fmt(l.overall_median) + unit}</strong>`).join(' · ');
         txt += `<br><strong>${d.direction}</strong>`;

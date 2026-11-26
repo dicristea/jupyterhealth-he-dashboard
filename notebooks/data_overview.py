@@ -9,10 +9,10 @@
 # ---
 
 # %% [markdown]
-# # What's in the Newest De-identified File
+# # What's in the Dataset
 #
 # **What this notebook is for:** a short, plain-language inventory of the
-# newest de-identified HE study file: how big it is, who and which days it
+# HE study dataset: how big it is, who and which days it
 # covers, what every column means (with units), how complete each column is,
 # and what the file does **not** contain.
 #
@@ -20,8 +20,8 @@
 # The notebook never shows a single participant's row.
 #
 # **How to run it:** open this file in VS Code or Jupyter and **Run All**.
-# It takes a few seconds once the study file has been converted (the first
-# conversion with R takes about a minute).
+# It takes a few seconds (on a study `.rds`, the first conversion with R takes
+# about a minute).
 #
 # > 🔒 **Privacy:** keep this notebook's outputs on your computer. **Never
 # > commit an `.ipynb` with outputs.** Only this blank `.py` version goes to
@@ -34,8 +34,8 @@
 # Jupyter.
 #
 # * `auto` (default): the study file if `HE_DATA_FILE` / `JH_DATA_FILE` is
-#   set or there is a `.rds` in `../../de-identified data/`, otherwise the
-#   synthetic cohort.
+#   set or the dashboard's data folder (`data.DEFAULT_DATA_DIR`, outside the
+#   repo) holds a `.rds`, otherwise the synthetic cohort.
 # * `study`: the study file only.
 # * `synthetic`: the synthetic cohort from the dashboard's `data.py`. No R, no
 #   study file.
@@ -74,13 +74,13 @@ if SYNTHETIC:
     print("⚠️  SYNTHETIC DATA. The numbers below describe the generator settings, not the study.")
 
 # %% [markdown]
-# ## Step 1 · Load the newest file
+# ## Step 1 · Load the data
 #
 # The dashboard's own loader (`data.py`) does the work. On study data, R
 # converts the `.rds` once into a cache **outside the repo**, keeping the
 # bedtimes as clock times only and refusing to write any calendar date.
 # "Newest" means `HE_DATA_FILE` (or `JH_DATA_FILE`) if you set one, otherwise
-# the most recently modified `.rds` in `../../de-identified data/`.
+# the most recently modified `.rds` in the dashboard's data folder.
 #
 # `harmonise_columns` then turns the `-999` "not available" code into missing,
 # derives `ascites` from current/previous ascites, and keeps one row per
@@ -169,7 +169,7 @@ GROUPS = {
     "Physiology": ["average_heart_rate", "average_hrv", "spo2", "average_breath", "breathing_disturbance_index"],
 }
 DESCRIPTIONS = {
-    "name": "Participant code (de-identified)",
+    "name": "Participant code",
     "days_since_start": "Study day (0 = first day; no calendar date)",
     "day_type": "Weekday / weekend (older files only)",
     "valid80": "1 = ring worn ≥ 80% of the day (a valid day)",

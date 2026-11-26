@@ -68,7 +68,8 @@
         const weeks = [...new Set(d.levels.flatMap(l => l.weeks))].sort((a, b) => a - b);
         const align = (l, k) => weeks.map(w => { const i = l.weeks.indexOf(w); return i < 0 ? null : l[k][i]; });
         Charts.lineChart(box.querySelector('.chart'), {
-            x: weeks.length ? weeks : [1], xLabel: 'study week', height: 170, yFormat: fmt,
+            x: weeks.length ? weeks : [1], xLabel: 'Study week', height: 170, yFormat: fmt,
+            yLabel: d.metric.unit && d.metric.unit !== 'clock' ? d.metric.unit : (d.metric.unit === 'clock' ? 'Clock time' : ''),
             series: d.levels.map((l, i) => ({y: align(l, 'median'), color: COLORS[i], width: 2})),
             bands: d.levels.map((l, i) => ({lo: align(l, 'q1'), hi: align(l, 'q3'), color: COLORS[i]})),
         });

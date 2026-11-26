@@ -56,9 +56,9 @@ def test_demo_serves_the_rendered_page_in_a_sandboxed_frame(rendered):
 
 def test_demo_page_not_rendered_says_not_available(rendered):
     client = app_module.app.test_client()
-    view = client.get("/notebooks/view/deid_oura_data_exploration")
+    view = client.get("/notebooks/view/oura_data_exploration")
     assert view.status_code == 404 and "Not available" in view.data.decode()
-    assert client.get("/notebooks/view/deid_oura_data_exploration/page").status_code == 404
+    assert client.get("/notebooks/view/oura_data_exploration/page").status_code == 404
 
 
 def test_only_allowlisted_names_are_served(rendered):

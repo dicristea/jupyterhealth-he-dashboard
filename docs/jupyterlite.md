@@ -2,7 +2,7 @@
 
 [JupyterLite](https://jupyterlite.readthedocs.io) is JupyterLab running entirely in the visitor's browser. Python is [Pyodide](https://pyodide.org) (CPython compiled to WebAssembly), so **code runs on the visitor's computer, never on a server of ours**. The site is static files on GitHub Pages:
 
-- Notebooks: `https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html?path=notebooks/<name>.ipynb`, with `<name>` = `data_overview`, `deid_oura_data_exploration` or `he_trajectories_phenotypes` (the speech starter is left out: Praat has no Pyodide build). The public demo's Notebooks tab links here (`JUPYTERLITE_URL` in `app.py` is the site root).
+- Notebooks: `https://dicristea.github.io/jupyterhealth-he-dashboard/lab/index.html?path=notebooks/<name>.ipynb`, with `<name>` = `data_overview`, `oura_data_exploration` or `he_trajectories_phenotypes` (the speech starter is left out: Praat has no Pyodide build). The public demo's Notebooks tab links here (`JUPYTERLITE_URL` in `app.py` is the site root).
 - Cohort export: `…/lab/index.html?fromURL=<notebook URL>&fromURLToFolder=notebooks` fetches a notebook from the demo and opens it in `notebooks/` (the [`jupyterlab-open-url-parameter`](https://github.com/jupyterlab-contrib/jupyterlab-open-url-parameter) extension, which JupyterLite doesn't ship on its own).
 
 Only synthetic data is in it. The file layout matches the repo, so the notebooks run unchanged:
@@ -10,7 +10,7 @@ Only synthetic data is in it. The file layout matches the repo, so the notebooks
 ```
 /data.py
 /notebooks/data_overview.ipynb                (from notebooks/*.py, no outputs)
-/notebooks/deid_oura_data_exploration.ipynb
+/notebooks/oura_data_exploration.ipynb
 /notebooks/he_trajectories_phenotypes.ipynb
 /synthetic_data/synthetic_he.csv.gz            (generated at build time, generator defaults)
 /synthetic_data/synthetic_he.settings.json     (its recipe)

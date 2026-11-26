@@ -17,7 +17,7 @@ def _execute(name: str):
     return "".join(o.get("text", "") for c in nb.cells if c.cell_type == "code" for o in c.outputs)
 
 
-@pytest.mark.parametrize("name", ["deid_oura_data_exploration", "he_trajectories_phenotypes"])
+@pytest.mark.parametrize("name", ["oura_data_exploration", "he_trajectories_phenotypes"])
 def test_notebook_runs_on_synthetic_data(name, monkeypatch):
     monkeypatch.setenv("HE_DATA_SOURCE", "synthetic")
     text = _execute(name)
@@ -34,7 +34,7 @@ def test_data_overview_runs_on_synthetic_data(monkeypatch):
         assert raw_rows not in src, raw_rows
 
 
-@pytest.mark.parametrize("name", ["deid_oura_data_exploration", "he_trajectories_phenotypes", "data_overview"])
+@pytest.mark.parametrize("name", ["oura_data_exploration", "he_trajectories_phenotypes", "data_overview"])
 def test_notebooks_open_the_study_file_only_through_data_py(name):
     # data.py's R step is the one place calendar dates are reduced to clock times; a notebook with its own
     # conversion could write a dated cache.

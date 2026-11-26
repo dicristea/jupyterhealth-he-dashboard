@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import warnings
 import urllib.parse
 import urllib.request
 import zlib
@@ -184,20 +185,18 @@ def nightly(key: str) -> bool:
 CLINICAL_SNAPSHOT = {
     "Liver severity": [("meld", "MELD"), ("ctp", "Child-Pugh"), ("total_bilirubin_t0", "Bilirubin (mg/dL)"),
                        ("albumin_t0", "Albumin (g/dL)"), ("inr_t0", "INR")],
-    "Decompensation": [("decomp", "Decompensated"), ("current_ascites", "Ascites now"),
-                       ("previous_ascites", "Ascites before enrollment"),
-                       ("medication_for_ascites", "Ascites medication"),
-                       ("variceal_bleeding_history", "Variceal bleed history")],
-    "Encephalopathy": [("previous_encephalopathy", "Previous overt HE"), ("che_phes", "Covert HE (PHES)"),
-                       ("phes_score", "PHES score"), ("medication_for_hepatic_enc", "On HE medication")],
-    "Other medication": [("bb_use_t0", "Beta-blocker")],
+    "Decompensation": [("decomp", "Decompensated"), ("current_ascites", "Ascites now")],
+    "Encephalopathy": [("che_phes", "Covert HE (PHES)"), ("phes_score", "PHES score")],
     "Frailty": [("liver_frailty_index", "Liver Frailty Index")],
     "Study": [("whichsite", "Site"), ("whicharm", "Arm"), ("cirrhosis_etiology", "Etiology")],
 }
-
-
-# The panel's dropdowns. The study file has no medication list or dated clinical events, so Medications and Clinical
-# history are shown only on synthetic data, with a few illustrative rows (synthetic_clinical_extras).
+# The Medications and Clinical history dropdowns: fields recorded at enrollment (both data sources; same rules as
+# above). The study file has no medication list and no dated events, so only synthetic patients also get a few
+# illustrative dated rows (synthetic_clinical_extras).
+SNAPSHOT_MEDICATIONS = [("bb_use_t0", "Beta-blocker"), ("medication_for_hepatic_enc", "HE medication"),
+                        ("medication_for_ascites", "Ascites medication")]
+SNAPSHOT_HISTORY = [("previous_encephalopathy", "Overt HE"), ("previous_ascites", "Ascites"),
+                    ("variceal_bleeding_history", "Variceal bleed")]
 SNAPSHOT_SECTIONS = {"status": "At enrollment", "medications": "Medications", "history": "Clinical history"}
 EXTRAS_SEED = 7  # the synthetic generator's default seed; with the patient id it fixes each patient's rows
 
@@ -225,10 +224,11 @@ def synthetic_clinical_extras(pid: str, first: pd.Series, last_day: int) -> dict
         meds.append({"name": "Spironolactone", "dose": "100 mg", "freq": "once daily", "since": since()})
         if rng.random() < 0.7:
             meds.append({"name": "Furosemide", "dose": "40 mg", "freq": "once daily", "since": since()})
-    if varices:
-        meds.append({"name": "Nadolol", "dose": "20 mg", "freq": "once daily", "since": since()})
-    elif decomp and rng.random() < 0.4:
-        meds.append({"name": "Carvedilol", "dose": "6.25 mg", "freq": "twice daily", "since": since()})
+    # A beta-blocker row exactly when the enrollment field says so (or, without that field, after a variceal bleed)
+    on_bb = _yes(first.get("bb_use_t0")) if "bb_use_t0" in first.index else varices or (decomp and rng.random() < 0.4)
+    if on_bb:
+        meds.append({"name": "Nadolol", "dose": "20 mg", "freq": "once daily", "since": since()} if varices else
+                    {"name": "Carvedilol", "dose": "6.25 mg", "freq": "twice daily", "since": since()})
     meds = meds[:4]
 
     def day() -> int:
@@ -253,12 +253,37 @@ def synthetic_clinical_extras(pid: str, first: pd.Series, last_day: int) -> dict
     return {"medications": meds, "history": events}
 
 
-def snapshot_extras(pid: str, first: pd.Series, last_day: int, source: str) -> dict:
-    """Medications and Clinical history for the panel: generated rows on synthetic data; None on study data, where
-    the two dropdowns are hidden."""
-    if source != "synthetic":
-        return {"synthetic": False, "medications": None, "history": None}
-    return {"synthetic": True, **synthetic_clinical_extras(pid, first, last_day)}
+def _snapshot_fields(first: pd.Series, columns: set, spec) -> tuple[list[dict], list[str]]:
+    """(shown fields, labels of present-but-empty fields) for one list of (column, label)."""
+    shown, missing = [], []
+    for col, label in spec:
+        if col == "ctp":
+            if not {"ctp_score", "ctp_class"} & columns:
+                continue
+            value = _ctp_text(first)
+        elif col in columns:
+            value = _baseline_value(first.get(col))
+        else:
+            continue
+        if value is None:
+            missing.append(label)
+        else:
+            shown.append({"label": label, "value": value})
+    return shown, missing
+
+
+def snapshot_extras(pid: str, first: pd.Series, last_day: int, source: str, columns) -> dict:
+    """Medications and Clinical history for the panel: the enrollment fields (any data source) plus, on synthetic
+    data only, illustrative dated rows. A dropdown with nothing to show is hidden (show_*)."""
+    columns = set(columns)
+    meds, meds_missing = _snapshot_fields(first, columns, SNAPSHOT_MEDICATIONS)
+    hist, hist_missing = _snapshot_fields(first, columns, SNAPSHOT_HISTORY)
+    rows = synthetic_clinical_extras(pid, first, last_day) if source == "synthetic" else {"medications": [], "history": []}
+    return {"synthetic": source == "synthetic",
+            "med_fields": meds, "med_missing": meds_missing, "medications": rows["medications"],
+            "history_fields": hist, "history_missing": hist_missing, "history": rows["history"],
+            "show_medications": bool(meds or meds_missing or rows["medications"]),
+            "show_history": bool(hist or hist_missing or rows["history"])}
 
 
 def _ctp_text(first: pd.Series) -> str | None:
@@ -277,21 +302,9 @@ def clinical_snapshot(first: pd.Series, columns) -> dict:
     Returns {"groups": [{group, fields}], "study": [fields], "not_recorded": [labels]}."""
     columns = set(columns)
     groups, study, not_recorded = [], [], []
-    for name, fields in CLINICAL_SNAPSHOT.items():
-        shown = []
-        for col, label in fields:
-            if col == "ctp":
-                if not {"ctp_score", "ctp_class"} & columns:
-                    continue
-                value = _ctp_text(first)
-            elif col in columns:
-                value = _baseline_value(first.get(col))
-            else:
-                continue
-            if value is None:
-                not_recorded.append(label)
-            else:
-                shown.append({"label": label, "value": value})
+    for name, spec in CLINICAL_SNAPSHOT.items():
+        shown, missing = _snapshot_fields(first, columns, spec)
+        not_recorded += missing
         if name == "Study":
             study = shown
         elif shown:
@@ -699,7 +712,7 @@ def synthetic_cohort(n: int = 24, seed: int = 7, min_days: int = 90, max_days: i
             met = met_by_class[slots.astype(int)] * rng.uniform(*act["met_jitter"], SLOTS)
             non_wear_pct = float((slots == "0").mean())
             row = {**base, "met_5min": ",".join(f"{m:.2f}" for m in met), "days_since_start": day,
-                   # Not in the Nov 2026 study file; kept because notebooks/deid_oura_data_exploration.py needs it
+                   # Not in the current study file; kept because notebooks/oura_data_exploration.py needs it
                    "day_type": "Weekend" if day % 7 in (6, 0) else "Weekday",
                    "valid80": int(non_wear_pct <= 0.2), "non_wear_pct": non_wear_pct,
                    "average_hrv": max(floor["hrv_ms"], rng.normal(hrv0, day_sd["hrv_ms"])),
@@ -1135,6 +1148,39 @@ def _night(day: int, r: pd.Series) -> dict:
 
 
 TIMING_NIGHTS = 30  # the sleep-timing chart shows the last 30 study days
+ACTIVITY_CLASSES = ["Ring off", "Rest", "Inactive", "Low", "Medium", "High"]  # Oura class_5_min codes 0-5
+ACTOGRAM_DAYS = 60  # the actogram shows the last 60 study days
+
+
+def activity_summary(full: pd.DataFrame, is_valid: pd.Series) -> dict | None:
+    """The profile's Activity section from valid days (>=80% wear): the 24-hour MET profile (percentiles per 5-minute
+    slot, with the share of days resting in each slot), time in each activity class, and actogram rows (every day of
+    the last ACTOGRAM_DAYS, invalid days marked). None when there is no 5-minute activity record."""
+    if "class_5_min" not in full:
+        return None
+    has_cls = full["class_5_min"].map(lambda x: isinstance(x, str) and len(x) == SLOTS)
+    ok = full[is_valid & has_cls]
+    if ok.empty:
+        return None
+    cls = np.array([list(x) for x in ok["class_5_min"]], dtype=int)
+    met = _met_rows(ok["met_5min"]) if "met_5min" in ok else np.full(cls.shape, np.nan)
+    pct = None
+    if np.isfinite(met).any():
+        with np.errstate(all="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            pct = np.nanpercentile(met, [10, 25, 50, 75, 90], axis=0)
+    tail = full.iloc[-ACTOGRAM_DAYS:]
+    return {
+        "days": int(len(cls)),
+        "hours": [round(DAY_STARTS_AT + i * 5 / 60, 3) for i in range(SLOTS)],
+        "rest_share": [round(float(x), 3) for x in (cls == 1).mean(axis=0)],
+        "met": None if pct is None else {k: [_fmt(x, 2) for x in row] for k, row in zip(["p10", "p25", "p50", "p75", "p90"], pct)},
+        "classes": [{"label": ACTIVITY_CLASSES[k], "hours": round(float((cls == k).sum() * 5 / 60 / len(cls)), 1)}
+                    for k in range(6)],
+        "actogram": [{"day": int(d), "valid": bool(is_valid.get(d, False)),
+                      "cls": r if isinstance(r, str) and len(r) == SLOTS else ""}
+                     for d, r in zip(tail.index, tail["class_5_min"])],
+    }
 
 
 def patient_detail(pid: str, window: int = RECENT_DAYS) -> dict | None:
@@ -1199,7 +1245,8 @@ def patient_detail(pid: str, window: int = RECENT_DAYS) -> dict | None:
         "ctp": _baseline_value(first.get("ctp_class")),
         "headline": clinical_headline(first),
         "clinical": clinical_snapshot(first, g.columns),
-        "extras": snapshot_extras(pid, first, last_day, source),
+        "extras": snapshot_extras(pid, first, last_day, source, g.columns),
+        "activity": activity_summary(full, is_valid),
         "days": days,
         "valid": [bool(x) for x in is_valid],
         "valid_pct": int(round(100 * is_valid.mean())),

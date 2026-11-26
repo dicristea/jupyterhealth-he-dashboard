@@ -20,6 +20,16 @@
         return ticks;
     }
 
+    // Axis titles: x centred under the tick labels, y rotated along the left edge.
+    function axisTitles(svg, W, H, m, xTitle, yTitle) {
+        if (xTitle) el('text', {x: (m.l + W - m.r) / 2, y: H - 5, 'text-anchor': 'middle', 'font-size': 11, fill: '#64748b'}, svg).textContent = xTitle;
+        if (yTitle) {
+            const cy = (m.t + H - m.b) / 2;
+            el('text', {x: 12, y: cy, 'text-anchor': 'middle', 'font-size': 11, fill: '#64748b', transform: `rotate(-90 12 ${cy})`}, svg).textContent = yTitle;
+        }
+    }
+    const margins = (xTitle, yTitle, base) => ({l: base.l + (yTitle ? 16 : 0), r: base.r, t: base.t, b: base.b + (xTitle ? 14 : 0)});
+
     function path(xs, ys, sx, sy) {
         let d = '', pen = false;
         xs.forEach((x, i) => {
@@ -32,11 +42,11 @@
     }
 
     // opts: {x: [...], series: [{y, color, width, opacity, dots}], bands: [{lo, hi, color, x?}],
-    //        xLabel, yFormat, height, shade: [bool per x] (greys out invalid days)}
+    //        xLabel, yLabel (axis titles), yFormat, height, shade: [bool per x] (greys out invalid days)}
     function lineChart(container, opts) {
         container.innerHTML = '';
-        const W = container.clientWidth || 700, H = opts.height || 220;
-        const m = {l: 48, r: 14, t: 10, b: 30};
+        const W = container.clientWidth || 700, H = (opts.height || 220) + (opts.xLabel ? 14 : 0);
+        const m = margins(opts.xLabel, opts.yLabel, {l: 48, r: 14, t: 10, b: 30});
         const svg = el('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img'}, container);
         const allX = opts.x;
         const ys = [];
@@ -63,7 +73,7 @@
         niceTicks(x0, x1, 8).forEach(t => {
             el('text', {x: sx(t), y: H - m.b + 16, 'text-anchor': 'middle', 'font-size': 11, fill: '#94a3b8'}, svg).textContent = t;
         });
-        if (opts.xLabel) el('text', {x: W - m.r, y: H - 2, 'text-anchor': 'end', 'font-size': 11, fill: '#64748b'}, svg).textContent = opts.xLabel;
+        axisTitles(svg, W, H, m, opts.xLabel, opts.yLabel);
 
         (opts.bands || []).forEach(b => {
             const bx = b.x || allX;
@@ -89,11 +99,12 @@
     // Each group: {name, color, values}. Box (IQR + median) with jittered dots, one per person.
     function stripChart(container, groups, opts) {
         container.innerHTML = '';
-        const W = container.clientWidth || 320, H = opts.height || 260;
-        const m = {l: 48, r: 10, t: 10, b: 34};
+        const W = container.clientWidth || 320, H = (opts.height || 260) + (opts.xLabel ? 14 : 0);
+        const m = margins(opts.xLabel, opts.yLabel, {l: 48, r: 10, t: 10, b: 34});
         const svg = el('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`}, container);
         const all = groups.flatMap(g => g.values.filter(v => v !== null));
         if (!all.length) return;
+        axisTitles(svg, W, H, m, opts.xLabel, opts.yLabel);
         let lo = Math.min(...all), hi = Math.max(...all);
         const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
         const sy = y => H - m.b - (y - lo) / (hi - lo) * (H - m.t - m.b);
@@ -149,8 +160,9 @@
     // Clicking a night calls onSelect(night) and fires a 'nightselect' event on the container.
     function sleepTiming(container, nights, band, onSelect, selectedDay) {
         container.innerHTML = '';
-        const W = container.clientWidth || 800, H = 320, m = {l: 48, r: 12, t: 10, b: 30};
+        const W = container.clientWidth || 800, H = 334, m = margins(true, true, {l: 48, r: 12, t: 10, b: 30});
         const svg = el('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Sleep timing by night'}, container);
+        axisTitles(svg, W, H, m, 'Study day of waking', 'Clock time');
         const rec = nights.filter(n => n.type && n.start !== null && n.end !== null);
         // 18:00 → 14:00 by default, stretched for main nights only (to 16:00 at most); a daytime record outside the
         // range is clipped to its edge, so it still shows and can be clicked.
@@ -200,17 +212,17 @@
             hit.addEventListener('click', select);
             if (n.day === selectedDay) marker = el('rect', {x: x - cw / 2 + 0.5, width: cw - 1, y: m.t, height: H - m.t - m.b, fill: 'none', stroke: '#2563eb', 'stroke-width': 1.5, rx: 3}, svg);
         });
-        el('text', {x: W - m.r, y: H - 2, 'text-anchor': 'end', 'font-size': 11, fill: '#64748b'}, svg).textContent = 'study day of waking';
     }
 
     // Hypnogram for one night: a row per stage (awake on top, deep at the bottom), one block per run of 5-minute slots.
     const STAGE_ROWS = [['4', 'Awake', '#f59e0b'], ['3', 'REM', '#8b5cf6'], ['2', 'Light', '#60a5fa'], ['1', 'Deep', '#1e3a8a']];
     function hypnogram(container, night) {
         container.innerHTML = '';
-        const W = container.clientWidth || 800, H = 140, m = {l: 48, r: 12, t: 6, b: 24};
+        const W = container.clientWidth || 800, H = 154, m = margins(true, true, {l: 48, r: 12, t: 6, b: 24});
         const svg = el('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Sleep stages'}, container);
         const s = night.hyp || '';
         if (!s) { el('text', {x: W / 2, y: H / 2, 'text-anchor': 'middle', fill: '#94a3b8', 'font-size': 13}, svg).textContent = 'No sleep-stage record for this night'; return; }
+        axisTitles(svg, W, H, m, 'Clock time', 'Stage');
         const t0 = night.start, t1 = night.start + s.length / 12;
         const sx = h => m.l + (h - t0) / ((t1 - t0) || 1) * (W - m.l - m.r);
         const rowH = (H - m.t - m.b) / STAGE_ROWS.length;
@@ -232,5 +244,97 @@
         }
     }
 
-    window.Charts = {lineChart, stripChart, sparkline, sleepTiming, hypnogram};
+    // Oura activity classes 0-5: ring off, rest, inactive, low, medium, high.
+    const ACT_COLORS = ['#e5e7eb', '#3949ab', '#bfdbfe', '#fcd34d', '#fb923c', '#c2410c'];
+    const slotClock = h => String(Math.round(h) % 24).padStart(2, '0') + ':00';
+
+    // 24-hour activity profile: MET percentile bands per 5-minute slot (04:00 -> 04:00), shaded where the patient
+    // usually rests (darker = rests then on more days). prof: {hours, met: {p10..p90}, rest_share}.
+    function percentileProfile(container, prof) {
+        container.innerHTML = '';
+        const W = container.clientWidth || 700, H = 240, m = margins(true, true, {l: 40, r: 12, t: 10, b: 28});
+        const svg = el('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': '24-hour activity profile'}, container);
+        const n = prof.hours.length, x0 = prof.hours[0], x1 = x0 + 24;
+        const hi = Math.max(3, ...prof.met.p90.filter(v => v !== null)) * 1.05;
+        const sx = h => m.l + (h - x0) / (x1 - x0) * (W - m.l - m.r);
+        const sy = y => H - m.b - y / hi * (H - m.t - m.b);
+        prof.rest_share.forEach((r, i) => {
+            if (r > 0.05) el('rect', {x: sx(prof.hours[i]), width: (W - m.l - m.r) / n + 0.5, y: m.t, height: H - m.t - m.b, fill: '#7c3aed', opacity: r * 0.16}, svg);
+        });
+        niceTicks(0, hi, 4).forEach(t => {
+            el('line', {x1: m.l, x2: W - m.r, y1: sy(t), y2: sy(t), stroke: '#eef2f7'}, svg);
+            el('text', {x: m.l - 6, y: sy(t) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#94a3b8'}, svg).textContent = t;
+        });
+        for (let h = x0; h <= x1; h += 4) {
+            el('text', {x: sx(h), y: H - m.b + 16, 'text-anchor': h === x0 ? 'start' : h === x1 ? 'end' : 'middle', 'font-size': 11, fill: '#94a3b8'}, svg).textContent = slotClock(h);
+        }
+        const band = (loK, hiK, op) => {
+            let d = '';
+            prof.hours.forEach((h, i) => { if (prof.met[hiK][i] !== null) d += (d ? 'L' : 'M') + sx(h) + ',' + sy(prof.met[hiK][i]); });
+            for (let i = n - 1; i >= 0; i--) if (prof.met[loK][i] !== null) d += 'L' + sx(prof.hours[i]) + ',' + sy(prof.met[loK][i]);
+            if (d) el('path', {d: d + 'Z', fill: '#2563eb', opacity: op}, svg);
+        };
+        band('p10', 'p90', 0.15);
+        band('p25', 'p75', 0.3);
+        el('path', {d: path(prof.hours, prof.met.p50, sx, sy), fill: 'none', stroke: '#1e3a8a', 'stroke-width': 2}, svg);
+        axisTitles(svg, W, H, m, 'Time of day', 'Activity (MET)');
+    }
+
+    // Horizontal bars, one per item: [{label, hours}]; colors[i] per bar (offset by 1: class 0 is left out).
+    function hBars(container, items, colors, xTitle) {
+        container.innerHTML = '';
+        const rowH = 30, W = container.clientWidth || 360, m = {l: 76, r: 40, t: 4, b: 44};
+        const H = m.t + m.b + rowH * items.length;
+        const svg = el('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': xTitle}, container);
+        const hi = Math.max(1, ...items.map(d => d.hours));
+        const ticks = niceTicks(0, hi, 4), top = ticks[ticks.length - 1] || hi;
+        const sx = v => m.l + v / Math.max(top, hi) * (W - m.l - m.r);
+        ticks.forEach(t => {
+            el('line', {x1: sx(t), x2: sx(t), y1: m.t, y2: H - m.b, stroke: '#eef2f7'}, svg);
+            el('text', {x: sx(t), y: H - m.b + 16, 'text-anchor': 'middle', 'font-size': 11, fill: '#94a3b8'}, svg).textContent = t;
+        });
+        items.forEach((d, i) => {
+            const y = m.t + i * rowH;
+            el('text', {x: m.l - 8, y: y + rowH / 2 + 4, 'text-anchor': 'end', 'font-size': 12, fill: '#475569'}, svg).textContent = d.label;
+            el('rect', {x: m.l, y: y + 6, width: Math.max(1, sx(d.hours) - m.l), height: rowH - 12, rx: 3, fill: colors[i + 1]}, svg);
+            el('text', {x: sx(d.hours) + 5, y: y + rowH / 2 + 4, 'font-size': 11, fill: '#475569'}, svg).textContent = d.hours + ' h';
+        });
+        axisTitles(svg, W, H, m, xTitle, null);
+    }
+
+    // Actogram: one row per study day, one column per 5-minute slot (04:00 -> 04:00), coloured by activity class.
+    // rows: [{day, valid, cls}] (cls = 288-character string or ''); invalid days are hatched.
+    function actogram(container, rows) {
+        container.innerHTML = '';
+        const W = container.clientWidth || 800, rowH = rows.length > 40 ? 5 : 8;
+        const m = margins(true, true, {l: 40, r: 12, t: 4, b: 26}), H = m.t + m.b + rows.length * rowH;
+        const svg = el('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Rest and activity by day'}, container);
+        const defs = el('defs', {}, svg);
+        const pat = el('pattern', {id: 'actHatch', width: 6, height: 6, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)'}, defs);
+        el('line', {x1: 0, y1: 0, x2: 0, y2: 6, stroke: '#cbd5e1', 'stroke-width': 2}, pat);
+        const cw = (W - m.l - m.r) / 288;
+        const every = Math.ceil(rows.length / Math.max(1, Math.floor(rows.length * rowH / 22)));
+        rows.forEach((r, k) => {
+            const y = m.t + k * rowH;
+            if (r.cls) {
+                for (let i = 0; i < r.cls.length;) {  // one rect per run of the same class
+                    let j = i;
+                    while (j < r.cls.length && r.cls[j] === r.cls[i]) j++;
+                    el('rect', {x: m.l + i * cw, y, width: (j - i) * cw + 0.3, height: rowH, fill: ACT_COLORS[+r.cls[i]] || '#fff'}, svg);
+                    i = j;
+                }
+            }
+            if (!r.valid) el('rect', {x: m.l, y, width: W - m.l - m.r, height: rowH, fill: 'url(#actHatch)', opacity: r.cls ? 0.8 : 1}, svg);
+            if (k % every === 0 || k === rows.length - 1) {
+                el('text', {x: m.l - 6, y: y + rowH / 2 + 4, 'text-anchor': 'end', 'font-size': 10, fill: '#94a3b8'}, svg).textContent = r.day;
+            }
+        });
+        for (let h = 4; h <= 28; h += 4) {
+            el('text', {x: m.l + (h - 4) / 24 * (W - m.l - m.r), y: H - m.b + 16, 'text-anchor': h === 4 ? 'start' : h === 28 ? 'end' : 'middle',
+                        'font-size': 11, fill: '#94a3b8'}, svg).textContent = slotClock(h);
+        }
+        axisTitles(svg, W, H, m, 'Time of day', 'Study day');
+    }
+
+    window.Charts = {lineChart, stripChart, sparkline, sleepTiming, hypnogram, percentileProfile, hBars, actogram, ACT_COLORS};
 })();

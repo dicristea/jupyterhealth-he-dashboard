@@ -15,6 +15,8 @@ import os
 import re
 import mimetypes
 import secrets
+import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -43,14 +45,15 @@ NOTEBOOK_DIRS = [Path(p).expanduser().resolve() for p in
 NOTEBOOK_REPO = os.environ.get("NOTEBOOK_REPO", "dicristea/jupyterhealth-he-dashboard")
 NOTEBOOK_REF = os.environ.get("NOTEBOOK_REF", "main")
 JUPYTERLITE_URL = os.environ.get("JUPYTERLITE_URL", "https://dicristea.github.io/jupyterhealth-he-dashboard").rstrip("/")
+# The data notebooks, in every mode (data-neutral wording: the same list serves the public demo and the study).
 # Written out rather than globbed: the Docker image holds no notebooks/ folder, and a test keeps this in step with it.
-DEMO_NOTEBOOKS = [
-    {"name": "data_overview", "title": "What's in the newest de-identified file",
+NOTEBOOKS = [
+    {"name": "data_overview", "title": "What's in the dataset",
      "description": "A plain-language inventory: how many people and days, what every column means (with units), "
-                    "how complete each column is, and what the file does not contain. Aggregates only."},
-    {"name": "deid_oura_data_exploration", "title": "Getting to know the dataset",
+                    "how complete each column is, and what the data does not contain. Aggregates only."},
+    {"name": "oura_data_exploration", "title": "Getting to know the dataset",
      "description": "A beginner-friendly tour: who is in the cohort, how complete each patient's data is, "
-                    "and what the sleep and activity measures look like."},
+                    "what sleep and activity look like, and detailed activity and vitals views per patient."},
     {"name": "he_trajectories_phenotypes", "title": "Trajectories and phenotypes",
      "description": "How groups of patients (for example decompensated vs. compensated) compare across the "
                     "study days, and whether patients cluster into a few recognisable types."},
@@ -424,11 +427,8 @@ def cohort_notebook():
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"cohort_{datetime.now():%Y%m%d_%H%M%S}.ipynb"
     nbformat.write(_build_cohort_notebook(sel, group), path)
-    try:
-        url = f"{JUPYTER_BASE_URL}/lab/tree/{path.relative_to(JUPYTER_ROOT).as_posix()}"
-    except ValueError:
-        url = None
-    return jsonify({"file": path.name, "url": url})
+    rel = _lab_path(path)
+    return jsonify({"file": path.name, "url": f"/notebooks/open/{rel}" if rel else None})
 
 
 def _md_text(text: str) -> str:
@@ -519,8 +519,9 @@ def notebooks():
     if data.HOSTED_STUDY:  # this site's own JupyterLite, on this data; no Binder or pre-run copies (no data at build)
         return render_template("notebooks.html", active="notebooks", notebooks=_hosted_notebooks(),
                                lite_available=(LITE_DIR / "index.html").is_file())
-    return render_template("notebooks.html", active="notebooks", notebooks=_list_notebooks(),
-                           jupyter_base=JUPYTER_BASE_URL, notebook_dirs=NOTEBOOK_DIRS)
+    registered, other = _local_notebooks()
+    return render_template("notebooks.html", active="notebooks", notebooks=registered, other_notebooks=other,
+                           lab_error=request.args.get("lab_error"))
 
 
 def _demo_notebooks() -> list[dict]:
@@ -530,12 +531,12 @@ def _demo_notebooks() -> list[dict]:
              "lite_url": f"{JUPYTERLITE_URL}/lab/index.html?path=notebooks/{nb['name']}.ipynb",
              "binder_url": f"https://mybinder.org/v2/gh/{NOTEBOOK_REPO}/{ref}"
                            f"?urlpath=lab/tree/notebooks/{nb['name']}.ipynb"}
-            for nb in DEMO_NOTEBOOKS]
+            for nb in NOTEBOOKS]
 
 
 def _hosted_notebooks() -> list[dict]:
     return [{**nb, "lite_url": f"{_lite_url()}?path=notebooks/{nb['name']}.ipynb",
-             "download_url": f"/lite/files/notebooks/{nb['name']}.ipynb"} for nb in DEMO_NOTEBOOKS]
+             "download_url": f"/lite/files/notebooks/{nb['name']}.ipynb"} for nb in NOTEBOOKS]
 
 
 # The hosted study site's JupyterLite: static files from Dockerfile.deid's builder stage, no data in them. Behind
@@ -574,7 +575,7 @@ def study_data():
 # Read-only notebook pages for the public demo, rendered on synthetic data in the Docker builder stage
 # (scripts/render_notebooks.py, same names). The app never runs a notebook; it only serves these files.
 RENDERED_DIR = HERE / "rendered_notebooks"
-RENDERED_NOTEBOOKS = {nb["name"]: nb["title"] for nb in DEMO_NOTEBOOKS}  # the allowlist
+RENDERED_NOTEBOOKS = {nb["name"]: nb["title"] for nb in NOTEBOOKS}  # the allowlist
 # The page is static: no scripts, no requests anywhere, sandboxed even when opened outside the iframe.
 NOTEBOOK_CSP = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; "
                 "form-action 'none'; frame-ancestors 'self'; sandbox allow-top-navigation-by-user-activation")
@@ -610,6 +611,8 @@ def notebook_page(name):
 
 # Notebooks shown as read-only code in every mode (never run by the app). Both Dockerfiles copy these files.
 CODE_PAGES = {"speech_features_starter": "Speech features (starter)"}
+# Locally, the data notebooks' source can be read the same way (the hosted images don't ship their .py files).
+LOCAL_CODE_PAGES = {nb["name"]: nb["title"] for nb in NOTEBOOKS}
 
 
 def _code_cells(source: str) -> list[dict]:
@@ -702,35 +705,115 @@ app.jinja_env.filters["md_html"] = _md_html
 
 @app.route("/notebooks/code/<name>")
 def notebook_code(name):
-    if name not in CODE_PAGES:
+    pages = CODE_PAGES if data.hosted() else {**CODE_PAGES, **LOCAL_CODE_PAGES}
+    if name not in pages:
         abort(404)
     path = HERE / "notebooks" / f"{name}.py"
     if not path.is_file():
         abort(404)
-    return render_template("notebook_code.html", active="notebooks", title=CODE_PAGES[name], file=path.name,
+    return render_template("notebook_code.html", active="notebooks", title=pages[name], file=path.name,
                            cells=_code_cells(path.read_text(encoding="utf-8")))
 
 
-def _list_notebooks() -> list[dict]:
-    out = []
+# Local Notebooks tab: the registered notebooks as cards (the speech starter has its own card), then any other .ipynb in
+# NOTEBOOK_DIRS (e.g. cohort exports). "Open in JupyterLab" goes through /notebooks/open/, which refreshes a
+# registered notebook's .ipynb from its .py and starts JupyterLab on this computer if it isn't running.
+NOTEBOOK_SRC = HERE / "notebooks"
+LAB_TOKEN_FILE = HERE / "notebook_outputs" / ".jupyterlab_token"  # git-ignored folder; this computer only
+
+
+def _when(path: Path) -> str:
+    return datetime.fromtimestamp(path.stat().st_mtime).strftime("%b %d, %Y %H:%M")
+
+
+def _lab_path(path: Path) -> str | None:
+    try:
+        return path.resolve().relative_to(JUPYTER_ROOT).as_posix()
+    except ValueError:
+        return None  # outside the JupyterLab root, so it can't be opened there
+
+
+def _local_notebooks() -> tuple[list[dict], list[dict]]:
+    registered = []
+    for nb in NOTEBOOKS:
+        src = NOTEBOOK_SRC / f"{nb['name']}.py"
+        if not src.is_file():
+            continue
+        rel = _lab_path(src.with_suffix(".ipynb"))
+        registered.append({**nb, "file": f"notebooks/{src.name}", "modified": _when(src),
+                           "open_url": f"/notebooks/open/{rel}" if rel else None,
+                           "code_url": f"/notebooks/code/{nb['name']}"})
+    names = {nb["name"] for nb in registered} | {"speech_features_starter"}
+    other = []
     for folder in NOTEBOOK_DIRS:
         if not folder.is_dir():
             continue
         for path in sorted(folder.glob("*.ipynb")):
-            stat = path.stat()
-            try:
-                rel = path.relative_to(JUPYTER_ROOT).as_posix()
-            except ValueError:
-                rel = None  # outside the JupyterLab root, so it can't be linked
-            out.append({
-                "name": path.stem.replace("_", " "),
-                "file": path.name,
-                "folder": folder.name,
-                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%b %d, %Y %H:%M"),
-                "size_kb": round(stat.st_size / 1024),
-                "url": f"{JUPYTER_BASE_URL}/lab/tree/{rel}" if rel else None,
-            })
-    return out
+            if folder.resolve() == NOTEBOOK_SRC.resolve() and path.stem in names:
+                continue
+            rel = _lab_path(path)
+            other.append({"name": path.stem.replace("_", " "), "file": path.name, "folder": folder.name,
+                          "modified": _when(path), "size_kb": round(path.stat().st_size / 1024),
+                          "open_url": f"/notebooks/open/{rel}" if rel else None})
+    return registered, other
+
+
+def _lab_running() -> bool:
+    try:
+        urllib.request.urlopen(f"{JUPYTER_BASE_URL}/api", timeout=1)
+    except urllib.error.HTTPError:
+        return True  # something answered
+    except (urllib.error.URLError, OSError):
+        return False
+    return True
+
+
+def _ensure_lab() -> str | None:
+    """Make sure JupyterLab answers at JUPYTER_BASE_URL; start it (bound to 127.0.0.1, with a random token kept in
+    LAB_TOKEN_FILE) if it doesn't and the URL is on this computer. Returns the token to log in with ("" when JupyterLab
+    was started some other way), or None if it couldn't be reached."""
+    if _lab_running():
+        return LAB_TOKEN_FILE.read_text().strip() if LAB_TOKEN_FILE.is_file() else ""
+    url = urllib.parse.urlparse(JUPYTER_BASE_URL)
+    if url.hostname not in ("localhost", "127.0.0.1"):
+        return None
+    token = secrets.token_urlsafe(24)
+    LAB_TOKEN_FILE.parent.mkdir(exist_ok=True)
+    LAB_TOKEN_FILE.write_text(token)
+    LAB_TOKEN_FILE.chmod(0o600)
+    log = open(LAB_TOKEN_FILE.parent / "jupyterlab.log", "ab")
+    subprocess.Popen([sys.executable, "-m", "jupyter", "lab", "--no-browser", "--ip=127.0.0.1",
+                      f"--port={url.port or 8888}", "--ServerApp.port_retries=0", f"--ServerApp.root_dir={JUPYTER_ROOT}",
+                      f"--IdentityProvider.token={token}"],
+                     cwd=JUPYTER_ROOT, stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(60):
+        time.sleep(0.5)
+        if _lab_running():
+            return token
+    return None
+
+
+@app.route("/notebooks/open/<path:rel>")
+def notebook_open(rel: str):
+    _local_only()
+    if request.headers.get("Sec-Fetch-Site", "none") not in ("same-origin", "none"):
+        abort(403)  # only from the dashboard itself, or typed in: another site can't start JupyterLab
+    path = (JUPYTER_ROOT / rel).resolve()
+    if path.suffix != ".ipynb" or _lab_path(path) is None:
+        abort(404)
+    src = path.with_suffix(".py")
+    if path.parent == NOTEBOOK_SRC.resolve() and src.is_file() and (
+            not path.exists() or path.stat().st_mtime < src.stat().st_mtime):
+        # The .py is the source: refresh the code and text, keeping the outputs already in the .ipynb
+        subprocess.run([sys.executable, "-m", "jupytext", "--update", "--to", "ipynb", "--quiet", str(src)],
+                       check=True, timeout=120, capture_output=True)
+    if not path.is_file():
+        abort(404)
+    token = _ensure_lab()
+    if token is None:
+        return redirect(url_for("notebooks", lab_error=1))
+    return redirect(f"{JUPYTER_BASE_URL}/lab/tree/{urllib.parse.quote(_lab_path(path))}"
+                    + (f"?token={token}" if token else ""))
 
 
 if __name__ == "__main__":

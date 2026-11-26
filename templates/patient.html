@@ -105,10 +105,33 @@
     </div>
 </div>
 
+{% set a = p.activity %}
+{% if a %}
+<div class="section-head"><h2 class="section">Activity</h2></div>
+<p class="sub" style="margin-bottom:12px">From Oura's 5-minute activity record, on the {{ a.days }} days with ≥80% ring wear.</p>
+<div class="two-col">
+    <div class="card">
+        <h2>24-hour activity profile</h2>
+        <p class="hint">All valid days stacked on one clock, 04:00 to 04:00. Dark line = typical (median) activity intensity; darker band = middle 50% of days, lighter band = 80%. Purple shading = times this patient is usually resting; daytime shading can mean napping.</p>
+        <div id="profile"></div>
+    </div>
+    <div class="card">
+        <h2>Time in each activity level</h2>
+        <p class="hint">Average hours per day in each Oura activity class, over valid days.</p>
+        <div id="classes"></div>
+    </div>
+</div>
+<div class="card">
+    <h2>Rest and activity, day by day (last {{ a.actogram | length }} days)</h2>
+    <p class="hint">One row per study day (most recent at the bottom), one column per 5 minutes from 04:00 to 04:00. Aligned dark-blue blocks at night mean a regular sleep-wake pattern; blocks drifting later or appearing in the day can mean a disturbed rhythm. Hatched rows had &lt;80% ring wear.</p>
+    <div id="actogram"></div>
+    <div class="legend" id="actLegend"></div>
+</div>
+{% endif %}
+
 <footer class="caveats">
-    <p>Sleep measures come from a consumer ring (Oura) and are not validated for diagnosing HE or sleep disorders. Use them to prompt a conversation, not to make decisions.</p>
+    <p>Sleep measures come from a consumer ring (Oura) and are not validated for diagnosing HE or sleep disorders.</p>
     <p>Comparisons are with this patient's own usual nights, not a normal range. A missing night means no sleep record, not poor sleep.</p>
-    <p>Clinical values are from enrollment only. This dataset has no dates of HE episodes, admissions, lab or medication changes, so a sleep change can't be linked to an event here. Times are clock times only; there are no calendar dates.</p>
 </footer>
 </div><!-- /.pt-main -->
 </div><!-- /.pt-layout -->
@@ -129,7 +152,8 @@
         document.getElementById('legendShade').textContent = s.noun === 'night' ? 'no main sleep record' : 'invalid day (<80% wear)';
         const vals = s.values.filter(v => v !== null).sort((a, b) => a - b);
         Charts.lineChart(document.getElementById('chart'), {
-            x: P.days, xLabel: s.noun === 'night' ? 'study day (night ending that morning)' : 'study day', height: 240, shade: s.shade,
+            x: P.days, xLabel: s.noun === 'night' ? 'Study day (night ending that morning)' : 'Study day', height: 240, shade: s.shade,
+            yLabel: meta.unit === 'clock' ? 'Clock time' : meta.label + (meta.unit ? ` (${meta.unit})` : ''),
             series: [{y: s.values, color: '#93c5fd', dots: true, opacity: 0.8}, {y: s.rolling, color: '#1d4ed8', width: 2.5}],
             refLines: [{y: vals[Math.floor(vals.length / 2)], color: '#94a3b8'}],
             yFormat: meta.unit === 'clock' ? clock : (v => +v.toFixed(meta.unit === 'h' ? 1 : 0)),
@@ -159,8 +183,16 @@
             Charts.sparkline(box, t.spark, t.band);
         });
         Charts.sleepTiming(document.getElementById('timing'), P.nights, P.mid_band, showNight, selectedDay);
+        const A = P.activity;
+        if (A) {
+            if (A.met) Charts.percentileProfile(document.getElementById('profile'), A);
+            Charts.hBars(document.getElementById('classes'), A.classes.filter(c => c.label !== 'Ring off'), Charts.ACT_COLORS, 'Hours per day');
+            Charts.actogram(document.getElementById('actogram'), A.actogram);
+        }
     }
 
+    if (P.activity) document.getElementById('actLegend').innerHTML = P.activity.classes
+        .map((c, i) => `<span><i style="background:${Charts.ACT_COLORS[i]};height:10px"></i>${c.label}</span>`).join('');
     let selectedDay = null;
     const latest = [...P.nights].reverse().find(n => n.main && n.hyp) || [...P.nights].reverse().find(n => n.type && n.hyp);
     if (latest) selectedDay = latest.day;
