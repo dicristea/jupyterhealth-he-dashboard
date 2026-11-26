@@ -2,7 +2,7 @@
 
 The public version of this dashboard runs only on synthetic data. This page describes the data format the dashboard expects, how the synthetic cohort is generated, which relationships are built into it, and how to change it or swap in your own dataset.
 
-> **Findings on synthetic data are artefacts of the generator's assumptions, not clinical results.** If decompensated patients show shorter night rest in the Cohort tab, it's because the generator was told to make them rest less (see [Built-in relationships](#built-in-relationships)). A p-value computed on this data says nothing about patients.
+> **Findings on synthetic data are artifacts of the generator's assumptions, not clinical results.** If decompensated patients show shorter night rest in the Cohort tab, it's because the generator was told to make them rest less (see [Built-in relationships](#built-in-relationships)). A p-value computed on this data says nothing about patients.
 
 ## Quick start
 

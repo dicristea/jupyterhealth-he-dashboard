@@ -43,7 +43,7 @@
 # * `synthetic`: the synthetic cohort from the dashboard's `data.py`. No R, no
 #   study file.
 #
-# > ⚠️ **On synthetic data, every result in this notebook is an artefact of
+# > ⚠️ **On synthetic data, every result in this notebook is an artifact of
 # > the generator's settings, not a clinical finding.** Group differences,
 # > p-values and phenotypes show what the generator was told to build. See
 # > [docs/synthetic-data.md](../docs/synthetic-data.md).
@@ -74,7 +74,7 @@ elif DATA_SOURCE == "auto":
 SYNTHETIC = DATA_SOURCE == "synthetic"
 print("Data source:", DATA_SOURCE + (" (from the study site)" if HOSTED_LITE else ""))
 if SYNTHETIC:
-    print("⚠️  SYNTHETIC DATA. Every result below is an artefact of the generator settings "
+    print("⚠️  SYNTHETIC DATA. Every result below is an artifact of the generator settings "
           "(docs/synthetic-data.md), not a clinical finding.")
 
 # %% [markdown]
@@ -651,7 +651,7 @@ pd.DataFrame(label_rows).drop(columns="p (raw)", errors="ignore")
 
 # %%
 lines = [
-    "**Trajectories & phenotypes: SYNTHETIC cohort. Generator artefacts, not clinical findings "
+    "**Trajectories & phenotypes: SYNTHETIC cohort. Generator artifacts, not clinical findings "
     "(docs/synthetic-data.md)**" if SYNTHETIC else "**Trajectories & phenotypes: HE study data**",
     f"- Clinical columns are baseline-only: {int((changes['people whose value changes over time'] == 0).sum())}"
     f"/{len(changes)} never change within a person, so pre/post-event plots need an event table "

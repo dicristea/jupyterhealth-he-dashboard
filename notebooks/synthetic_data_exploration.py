@@ -55,7 +55,7 @@ df, ORIGIN = he_data.notebook_table(SOURCE)
 SYNTHETIC = "synthetic" in ORIGIN
 print("Data source:", "synthetic" if SYNTHETIC else "study", f"({ORIGIN})")
 if SYNTHETIC:
-    print("⚠️  SYNTHETIC DATA. Results are artefacts of the generator settings, not clinical findings.")
+    print("⚠️  SYNTHETIC DATA. Results are artifacts of the generator settings, not clinical findings.")
 
 plt.rcParams.update({"figure.dpi": 110, "axes.spines.top": False, "axes.spines.right": False,
                      "axes.titlesize": 11, "axes.labelsize": 10})
@@ -349,7 +349,7 @@ lines = [
     f"- Median steps per valid day: {df.loc[VALID, 'steps'].median():,.0f}.",
 ]
 if SYNTHETIC:
-    lines.insert(0, "**Synthetic cohort: generator artefacts, not clinical findings.**")
+    lines.insert(0, "**Synthetic cohort: generator artifacts, not clinical findings.**")
 from IPython.display import Markdown
 Markdown("\n".join(lines))
 
